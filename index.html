@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5" />
 <meta name="description" content="An interactive map of Apia, Samoa. Places, transport, money, health and sights, built on live OpenStreetMap data." />
-<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)" />
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#0e1720" media="(prefers-color-scheme: dark)" />
+<meta name="theme-color" content="#fbfaf8" media="(prefers-color-scheme: light)" />
 <meta name="color-scheme" content="light dark" />
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="icon" href="icon.svg" type="image/svg+xml" />
@@ -19,7 +19,7 @@
 
   <header class="topbar">
     <button id="sidebarToggle" class="icon-btn" aria-expanded="true" aria-controls="sidebar" title="Show or hide the place list">
-      <span class="i" aria-hidden="true">☰</span><span class="sr-only">Toggle place list</span>
+      <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/></svg><span class="sr-only">Toggle place list</span>
     </button>
 
     <div class="brand">
@@ -31,21 +31,21 @@
     </div>
 
     <div class="search" role="combobox" aria-expanded="false" aria-owns="searchResults" aria-haspopup="listbox">
-      <span class="search-icon" aria-hidden="true">🔎</span>
+      <span class="search-icon" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg></span>
       <input id="searchInput" type="search" placeholder="Search Apia — places, banks, food, buses…"
              autocomplete="off" autocapitalize="off" spellcheck="false"
              aria-controls="searchResults" aria-autocomplete="list" aria-label="Search places in Apia" />
-      <button id="searchClear" class="icon-btn ghost" hidden title="Clear search"><span aria-hidden="true">✕</span><span class="sr-only">Clear search</span></button>
+      <button id="searchClear" class="icon-btn ghost" hidden title="Clear search"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/></svg><span class="sr-only">Clear search</span></button>
       <ul id="searchResults" class="search-results" role="listbox" hidden></ul>
     </div>
 
     <div class="topbar-actions">
       <span id="netDot" class="net-dot" title="Connection status" hidden></span>
       <span id="clock" class="clock" title="Current local time in Apia (UTC+13)"></span>
-      <button id="walksBtn" class="icon-btn" title="Guided walks"><span class="i" aria-hidden="true">🥾</span><span class="sr-only">Guided walks</span></button>
-      <button id="guideBtn" class="icon-btn" title="Know before you go"><span class="i" aria-hidden="true">ℹ️</span><span class="sr-only">Practical information</span></button>
-      <button id="layersBtn" class="icon-btn" title="Basemap and layers"><span class="i" aria-hidden="true">🗺️</span><span class="sr-only">Basemap</span></button>
-      <button id="dataBtn" class="icon-btn" title="Data source and freshness"><span class="i" aria-hidden="true">🛰️</span><span class="sr-only">Data source</span></button>
+      <button id="walksBtn" class="icon-btn" title="Guided walks"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M13.5 5.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM9.8 8.9 7 23h2.1l1.8-8 2.1 2v6h2v-7.5l-2.1-2 .6-3A7.3 7.3 0 0 0 19 13v-2c-1.85 0-3.4-.98-4.1-2.4l-1-1.6c-.56-.89-1.68-1.25-2.65-.84L6 8.3V13h2V9.6l1.8-.7z"/></svg><span class="sr-only">Guided walks</span></button>
+      <button id="guideBtn" class="icon-btn" title="Know before you go"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><span class="sr-only">Practical information</span></button>
+      <button id="layersBtn" class="icon-btn" title="Basemap and layers"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.26-7.38 5.73zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z"/></svg><span class="sr-only">Basemap</span></button>
+      <button id="dataBtn" class="icon-btn" title="Data source and freshness"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3C7.58 3 4 4.79 4 7v10c0 2.21 3.58 4 8 4s8-1.79 8-4V7c0-2.21-3.58-4-8-4zm6 14c0 .5-2.13 2-6 2s-6-1.5-6-2v-2.23c1.61.78 3.72 1.23 6 1.23s4.39-.45 6-1.23V17zm0-5c0 .5-2.13 2-6 2s-6-1.5-6-2V9.77C7.61 10.55 9.72 11 12 11s4.39-.45 6-1.23V12zm-6-3C8.13 9 6 7.5 6 7s2.13-2 6-2 6 1.5 6 2-2.13 2-6 2z"/></svg><span class="sr-only">Data source</span></button>
     </div>
   </header>
 

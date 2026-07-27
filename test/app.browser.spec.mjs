@@ -306,6 +306,43 @@ test('right-click answers "what is near this point"', async ({ page }) => {
   await expect(detail.locator('h2')).not.toHaveText('Near this point');
 });
 
+test('a wikidata-tagged place shows its Commons photo, attributed', async ({ page }) => {
+  // Stub the place's own authority record: P18 -> a Commons file, and the
+  // Special:FilePath thumbnail request -> a real PNG.
+  await page.route(/www\.wikidata\.org\/w\/api\.php.*wbgetclaims/, (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        claims: { P18: [{ mainsnak: { datavalue: { value: 'RLS Museum test.jpg' } } }] },
+      }),
+    }));
+  await page.route(/commons\.wikimedia\.org\/wiki\/Special:FilePath/, (route) =>
+    route.fulfill({ contentType: 'image/png', body: BLANK_PNG }));
+
+  await open(page);
+  await page.locator('#searchInput').fill('stevenson museum');
+  await page.locator('#searchResults [role="option"] button').first().click();
+
+  const photo = page.locator('#detailPhoto');
+  await expect(photo).toBeVisible();
+  await expect(photo.locator('img')).toHaveAttribute('alt', /Robert Louis Stevenson/);
+  // Attribution is not optional for Commons media.
+  await expect(photo.locator('a.photo-credit')).toHaveAttribute(
+    'href', /commons\.wikimedia\.org\/wiki\/File:/);
+});
+
+test('a place with no wikidata record simply shows no photo', async ({ page }) => {
+  let wikidataCalled = false;
+  await page.route(/www\.wikidata\.org/, (route) => { wikidataCalled = true; route.abort(); });
+
+  await open(page);
+  await page.locator('#searchInput').fill('amanaki');
+  await page.locator('#searchResults [role="option"] button').first().click();
+  await expect(page.locator('#detail h2')).toHaveText('Amanaki Café');
+  await expect(page.locator('#detailPhoto')).toBeHidden();
+  expect(wikidataCalled).toBe(false); // no wikidata tag -> no lookup at all
+});
+
 test('keyboard help opens with ?', async ({ page }) => {
   await open(page);
   await page.keyboard.press('?');

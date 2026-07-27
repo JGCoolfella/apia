@@ -24,6 +24,8 @@ import { CATEGORIES, CATEGORY_ORDER } from './classify.js';
 import { BASEMAPS, DEFAULT_BASEMAP } from './basemaps.js';
 import { loadDataset, refreshFromOSM, clearCache } from './data.js';
 import { buildIndex, search, matchSegments } from './search.js';
+import { CATEGORY_ICONS, svgIcon } from './icons.js';
+import { resolvePhoto } from './photos.js';
 import {
   escapeHTML, distanceMeters, formatDistance, walkingTime, evaluateHours,
   telHref, osmLink, osmEditLink, directionsLinks, joinHighlights, currentApiaTime,
@@ -285,7 +287,7 @@ function showNearby(coords) {
     const p = f.properties;
     const c = CATEGORIES[p.cat];
     return `<button class="result" data-id="${escapeHTML(p.id)}">
-      <span class="cat-bubble" style="--cat:${c.color}">${c.icon}</span>
+      ${catBubble(p.cat)}
       <span class="res-body">
         <span class="res-name">${escapeHTML(p.name)}</span>
         <span class="tagline">${escapeHTML(p.kind)}</span>
@@ -324,8 +326,9 @@ function applyDarkDim() {
 }
 
 /**
- * Category pins are drawn to a canvas at load time — no sprite sheet, no
- * network request, and the palette stays in one place in classify.js.
+ * Category pins, drawn to a canvas at load time from the same SVG paths the
+ * HTML uses — no sprite sheet, no network request, identical artwork on the
+ * map and in the UI, and none of emoji's cross-platform lottery.
  */
 function addPinImages(map) {
   const dpr = 2;
@@ -350,20 +353,28 @@ function addPinImages(map) {
     ctx.fill();
     ctx.stroke();
 
-    ctx.beginPath();
-    ctx.arc(cx, cy, 8.4, 0, Math.PI * 2);
-    ctx.fillStyle = '#ffffff';
-    ctx.fill();
-
-    ctx.font = '11px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",system-ui,sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(def.icon, cx, cy + 0.5);
+    // White glyph on the coloured head, scaled from the 24x24 icon grid.
+    const pathD = CATEGORY_ICONS[cat];
+    if (pathD) {
+      const scale = 14 / 24;
+      ctx.save();
+      ctx.translate(cx - 7, cy - 7);
+      ctx.scale(scale, scale);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill(new Path2D(pathD));
+      ctx.restore();
+    }
 
     const img = ctx.getImageData(0, 0, c.width, c.height);
     if (map.hasImage(`pin-${cat}`)) map.removeImage(`pin-${cat}`);
     map.addImage(`pin-${cat}`, img, { pixelRatio: dpr });
   }
+}
+
+/** The tinted category icon used in list rows, chips, results and cards. */
+function catBubble(cat, cls = '') {
+  const c = CATEGORIES[cat];
+  return `<span class="cat-bubble ${cls}" style="--cat:${c.color}">${svgIcon(CATEGORY_ICONS[cat])}</span>`;
 }
 
 const EMPTY_FC = { type: 'FeatureCollection', features: [] };
@@ -555,7 +566,7 @@ function buildChips() {
   wrap.innerHTML = CATEGORY_ORDER.map((cat) => {
     const c = CATEGORIES[cat];
     return `<button class="chip" role="switch" data-cat="${cat}" aria-pressed="${state.active.has(cat)}" title="${escapeHTML(c.blurb)}" style="--cat:${c.color}">
-      <span class="chip-icon">${c.icon}</span>${escapeHTML(c.label)}
+      <span class="chip-icon">${svgIcon(CATEGORY_ICONS[cat])}</span>${escapeHTML(c.label)}
       <span class="n" data-count="${cat}"></span>
     </button>`;
   }).join('');
@@ -620,7 +631,7 @@ function renderList() {
     const pick = state.highlightById.has(p.id) ? '<span class="badge pick">Pick</span>' : '';
     return `<li>
       <button class="result" data-id="${escapeHTML(p.id)}" aria-current="${state.selectedId === p.id}">
-        <span class="cat-bubble" style="--cat:${cat.color}">${cat.icon}</span>
+        ${catBubble(p.cat)}
         <span class="res-body">
           <span class="res-name">${escapeHTML(p.name)}${badge}${pick}</span>
           <span class="tagline">${escapeHTML(p.kind)}${p.addr ? ' · ' + escapeHTML(p.addr) : ''}</span>
@@ -853,12 +864,13 @@ function showDetail(id) {
     .join('');
 
   $('#detail').innerHTML = `
+    <div class="detail-photo" id="detailPhoto" hidden></div>
     <div class="detail-head" style="--cat:${cat.color}">
       <button class="icon-btn ghost detail-close" data-act="close" title="Close"><span aria-hidden="true">✕</span><span class="sr-only">Close</span></button>
       <h2>${escapeHTML(p.name)}</h2>
       ${p.name_sm ? `<div class="detail-sm">${escapeHTML(p.name_sm)}</div>` : ''}
       <div class="detail-kind">
-        <span class="cat-bubble sm" style="--cat:${cat.color}">${cat.icon}</span>
+        ${catBubble(p.cat, 'sm')}
         <span>${escapeHTML(p.kind)} · ${escapeHTML(cat.label)}</span>
         ${hours.state === 'open' ? '<span class="badge open">Open now</span>' : ''}
         ${hours.state === 'closed' ? '<span class="badge closed">Closed now</span>' : ''}
@@ -881,6 +893,44 @@ function showDetail(id) {
       </div>
     </div>`;
   $('#detail').hidden = false;
+
+  loadDetailPhoto(p);
+}
+
+/**
+ * Photograph for the place, via its own Wikidata record's P18 image claim on
+ * Wikimedia Commons. Only places whose OSM object links a wikidata entity can
+ * ever show a photo — nothing is looked up by name, so a picture cannot land
+ * on the wrong place. Fails silent: no image is a normal outcome.
+ */
+async function loadDetailPhoto(p) {
+  if (!p.wikidata) return;
+  const forId = p.id;
+  const photo = await resolvePhoto(p.wikidata).catch(() => null);
+  if (!photo) return;
+  // The user may have moved on while we fetched.
+  if (state.selectedId !== forId) return;
+  const slot = $('#detailPhoto');
+  if (!slot) return;
+
+  const img = new Image();
+  img.alt = `Photograph of ${p.name}`;
+  // NOT loading='lazy': a lazy image that is not yet in the document never
+  // loads, and this one is only appended once it has loaded. The fetch itself
+  // is already deferred — it only starts when the panel opens.
+  img.onload = () => {
+    slot.innerHTML = '';
+    slot.appendChild(img);
+    const credit = document.createElement('a');
+    credit.className = 'photo-credit';
+    credit.href = photo.pageUrl;
+    credit.target = '_blank';
+    credit.rel = 'noopener noreferrer';
+    credit.textContent = 'Wikimedia Commons';
+    slot.appendChild(credit);
+    slot.hidden = false;
+  };
+  img.src = photo.thumbUrl;
 }
 
 function fact(icon, valueHTML) {
@@ -1073,7 +1123,7 @@ function wireSearch() {
           .join('');
         return `<li role="option" id="sr-${i}" aria-selected="false">
           <button data-id="${escapeHTML(p.id)}" data-i="${i}">
-            <span class="cat-bubble" style="--cat:${c.color}">${c.icon}</span>
+            ${catBubble(p.cat)}
             <span class="res-body">
               <span class="res-name">${name}</span>
               <span class="res-meta">${escapeHTML(p.kind)}${p.addr ? ' · ' + escapeHTML(p.addr) : ''}</span>

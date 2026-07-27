@@ -187,11 +187,13 @@ Resources:
               worker-src 'self' blob:;
               child-src 'self' blob:;
               style-src 'self' 'unsafe-inline';
-              img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.opentopomap.org;
+              img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.opentopomap.org
+              https://commons.wikimedia.org https://upload.wikimedia.org;
               font-src 'self' data:;
               connect-src 'self' blob: https://tile.openstreetmap.org https://*.tile.opentopomap.org
               https://fonts.openmaptiles.org https://overpass-api.de https://overpass.kumi.systems
-              https://overpass.private.coffee https://overpass.osm.jp https://maps.mail.ru;
+              https://overpass.private.coffee https://overpass.osm.jp https://maps.mail.ru
+              https://www.wikidata.org;
               upgrade-insecure-requests
 
   Distribution:
