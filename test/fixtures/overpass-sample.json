@@ -79,6 +79,22 @@
       "tags": { "name": "Tanoa Tusitala Hotel", "tourism": "hotel", "stars": "4" }
     },
     {
+      "type": "node", "id": 1017, "lat": -13.8390, "lon": -171.7740,
+      "tags": { "name": "Motoʻotua", "place": "suburb" }
+    },
+    {
+      "type": "node", "id": 1018, "lat": -13.8300, "lon": -172.0050,
+      "tags": { "name": "Faleolo", "place": "village" }
+    },
+    {
+      "type": "node", "id": 1019, "lat": -13.8520, "lon": -171.7730,
+      "tags": { "name": "Lalovaea", "place": "suburb" }
+    },
+    {
+      "type": "node", "id": 1020, "lat": -13.8535, "lon": -171.7715,
+      "tags": { "name": "Mount Vaea", "natural": "peak", "ele": "472" }
+    },
+    {
       "type": "node", "id": 9001, "lat": -13.8400, "lon": -171.7800,
       "tags": { "barrier": "gate" }
     },

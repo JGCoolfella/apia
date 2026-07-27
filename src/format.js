@@ -175,30 +175,63 @@ export function directionsLinks(coords, name) {
 }
 
 /**
+ * Whole-word containment after folding. Plain substring matching is not safe
+ * here: "vaea" appears inside "Lalovaea", which is a completely different place,
+ * and Samoan place names share syllables constantly.
+ */
+export function matchesWords(name, pattern) {
+  const tokenise = (s) => ` ${s.replace(/[^a-z0-9]+/g, ' ').trim()} `;
+  return tokenise(name).includes(tokenise(pattern));
+}
+
+/**
  * Attach editorial blurbs to OSM features by name. Positions always come from
- * OSM; this only decides which feature a piece of writing belongs to. The most
- * prominent matching feature wins so a blurb lands on the cathedral itself
- * rather than on a bus stop named after it.
+ * OSM; this only decides which feature a piece of writing belongs to.
+ *
+ * Two rules keep the writing off the wrong pin:
+ *
+ * 1. A highlight may declare the categories it belongs to. Only features in
+ *    those categories are considered — so the hospital blurb cannot land on the
+ *    village node also called Motoʻotua, and the airport blurb cannot land on
+ *    the village called Faleolo. If nothing in the right category matches, the
+ *    highlight is dropped rather than attached to something plausible-looking.
+ *    No blurb is better than a confidently misplaced one.
+ * 2. Failing that, area and village nodes lose to real destinations, because
+ *    they take their names from the neighbourhood and would otherwise shadow
+ *    the thing the writing is actually about.
  */
 export function joinHighlights(features, highlights = []) {
   const byId = new Map();
+
   for (const h of highlights) {
     const patterns = (h.match || []).map(fold).filter(Boolean);
+    const preferred = h.cat ? (Array.isArray(h.cat) ? h.cat : [h.cat]) : null;
+
     let best = null;
     let bestScore = -Infinity;
+
     for (const f of features) {
-      const name = fold(f.properties.name);
+      const p = f.properties;
+      if (preferred && !preferred.includes(p.cat)) continue;
+
+      const name = fold(p.name);
       if (!name) continue;
-      const hit = patterns.some((p) => name.includes(p));
+      const hit = patterns.find((pat) => matchesWords(name, pat));
       if (!hit) continue;
-      // Prefer prominent, real destinations over stops and stubs named after them.
-      let score = 10 - (f.properties.rank ?? 5);
-      if (f.properties.cat === 'transport' && f.properties.kind === 'Bus stop') score -= 20;
-      if (f.properties.unnamed) score -= 15;
-      if (patterns.some((p) => name === p)) score += 8;
+
+      let score = 10 - (p.rank ?? 5);
+      if (!preferred && p.cat === 'places') score -= 25;
+      if (p.kind === 'Bus stop') score -= 30;
+      if (p.unnamed) score -= 15;
+      if (name === hit) score += 10;
+      else if (name.startsWith(hit)) score += 4;
+
       if (score > bestScore) { bestScore = score; best = f; }
     }
-    if (best) byId.set(best.properties.id, h);
+
+    // One OSM object should not carry two different blurbs.
+    if (best && !byId.has(best.properties.id)) byId.set(best.properties.id, h);
   }
+
   return byId;
 }

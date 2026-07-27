@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 import { classify } from '../src/classify.js';
 import { toGeoJSON, buildQuery, runOverpass } from '../src/overpass.js';
-import { evaluateHours, distanceMeters, formatDistance, joinHighlights } from '../src/format.js';
+import { evaluateHours, distanceMeters, formatDistance, joinHighlights, matchesWords } from '../src/format.js';
 import { buildIndex, search, fold } from '../src/search.js';
 import { BBOX } from '../src/config.js';
 
@@ -255,6 +255,42 @@ test.describe('editorial join', () => {
     const busStop = fc.features.find((f) => f.properties.name === 'Savalalo Terminal');
     expect(joined.has(fleaMarket.properties.id)).toBe(true);
     expect(joined.has(busStop.properties.id)).toBe(false);
+  });
+
+  test('matches whole words, not syllables inside other names', () => {
+    // The bug this prevents: "vaea" matching the suburb "Lalovaea", which put the
+    // Mount Vaea / Stevenson's tomb blurb on an unrelated place.
+    expect(matchesWords('lalovaea', 'vaea')).toBe(false);
+    expect(matchesWords('mount vaea', 'vaea')).toBe(true);
+    expect(matchesWords('cathedral of the immaculate conception', 'immaculate conception')).toBe(true);
+
+    const lalovaea = fc.features.find((f) => f.properties.name === 'Lalovaea');
+    const mtVaea = fc.features.find((f) => f.properties.name === 'Mount Vaea');
+    expect(joined.get(lalovaea.properties.id)).toBeUndefined();
+    expect(joined.get(mtVaea.properties.id)?.id).toBe('mt-vaea');
+  });
+
+  test('will not put a blurb on a village that shares the place name', () => {
+    // Motoʻotua is both the hospital's suburb and a place node; Faleolo is both
+    // the airport and a village. The blurbs belong on the facility, not the area.
+    const hospital = fc.features.find((f) => f.properties.cat === 'health');
+    const suburb = fc.features.find((f) => f.properties.name === 'Motoʻotua');
+    expect(joined.get(hospital.properties.id)?.id).toBe('hospital');
+    expect(joined.get(suburb.properties.id)).toBeUndefined();
+
+    const airport = fc.features.find((f) => f.properties.kind === 'Airport');
+    const village = fc.features.find((f) => f.properties.name === 'Faleolo' && f.properties.cat === 'places');
+    expect(joined.get(airport.properties.id)?.id).toBe('faleolo');
+    expect(joined.get(village.properties.id)).toBeUndefined();
+  });
+
+  test('every highlight declares the categories it may attach to', () => {
+    // Without this, a highlight falls back to loose matching across all 2,400+
+    // features and can land anywhere.
+    for (const h of curated.highlights) {
+      expect(Array.isArray(h.cat), `${h.id} has no cat`).toBe(true);
+      expect(h.cat.length).toBeGreaterThan(0);
+    }
   });
 
   test('carries no coordinates of its own', () => {

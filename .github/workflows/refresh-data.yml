@@ -55,7 +55,10 @@ jobs:
       - name: Commit if anything changed
         if: steps.decide.outputs.run == 'true'
         run: |
-          if git diff --quiet -- public/data/; then
+          # `git diff` ignores untracked files, so on the very first run — when
+          # the snapshot does not exist yet — it reports "no change" and the new
+          # dataset is silently thrown away. `git status --porcelain` sees both.
+          if [ -z "$(git status --porcelain -- public/data/)" ]; then
             echo "No change in the OpenStreetMap data for Apia."
             exit 0
           fi
