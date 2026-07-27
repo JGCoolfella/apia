@@ -31,13 +31,15 @@ async function main() {
   log('Requesting... (a cold Overpass query over this area usually takes 20-90s)\n');
 
   const started = Date.now();
-  const { json, endpoint } = await runOverpass(
-    query,
-    OVERPASS_ENDPOINTS,
-    fetch,
-    (url, attempt) => log(`  -> ${url}${attempt > 1 ? ` (retry ${attempt})` : ''}`),
-    (url, attempt, message) => log(`     x  ${message}`),
-  );
+  const { json, endpoint, ageDays, stale } = await runOverpass(query, {
+    endpoints: OVERPASS_ENDPOINTS,
+    onAttempt: (url, attempt) => log(`  -> ${url}${attempt > 1 ? ` (retry ${attempt})` : ''}`),
+    onFailure: (url, attempt, message) => log(`     x  ${message}`),
+  });
+  if (stale) {
+    log('\nWARNING: every Overpass mirror is behind the OpenStreetMap planet.');
+    log('The snapshot below is the freshest available, but it is not current.');
+  }
   const elapsed = ((Date.now() - started) / 1000).toFixed(1);
   log(`\nGot ${json.elements.length} raw elements from ${endpoint} in ${elapsed}s.`);
 

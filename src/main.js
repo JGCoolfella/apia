@@ -10,7 +10,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { Protocol } from 'pmtiles';
 
 import './styles.css';
-import { APIA_CENTER, DEFAULT_CENTER, DEFAULT_ZOOM, MAX_BOUNDS, IANA_TZ } from './config.js';
+import { APIA_CENTER, DEFAULT_CENTER, DEFAULT_ZOOM, MAX_BOUNDS, IANA_TZ, STALE_SNAPSHOT_DAYS } from './config.js';
 import { CATEGORIES, CATEGORY_ORDER } from './classify.js';
 import { BASEMAPS, DEFAULT_BASEMAP } from './basemaps.js';
 import { loadDataset, refreshFromOSM, clearCache } from './data.js';
@@ -749,7 +749,21 @@ function openData() {
     live: 'Fetched live from the Overpass API',
   }[m.origin] || 'Unknown';
 
+  // Overpass mirrors replicate independently and some fall a long way behind.
+  // If the data underneath this map is old, say so rather than let it pass as
+  // current — that is the whole difference between a map and a guess.
+  const ageDays = m.osm_data_timestamp
+    ? (Date.now() - new Date(m.osm_data_timestamp)) / 86_400_000
+    : null;
+  const staleNotice = ageDays !== null && ageDays > STALE_SNAPSHOT_DAYS
+    ? `<div class="notice"><h3>⚠️ This data is ${Math.round(ageDays)} days old</h3>
+       <p>The snapshot behind this map is well behind OpenStreetMap. Places that
+       have opened, closed or moved since then will be wrong. Use
+       <strong>Refresh from OpenStreetMap</strong> below to pull current data.</p></div>`
+    : '';
+
   const dlg = openDialog('#dataDlg', 'Where this map comes from', `
+    ${staleNotice}
     <dl class="kv">
       <dt>Places loaded</dt><dd>${(m.feature_count ?? state.all.length).toLocaleString()}</dd>
       <dt>Source</dt><dd>${origin}</dd>

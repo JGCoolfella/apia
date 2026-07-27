@@ -51,7 +51,7 @@ test.describe('Overpass mirror failover', () => {
       seen.push(url);
       return url === 'c' ? reply(ok) : reply('gateway timeout', 504);
     };
-    const res = await runOverpass('q', fast, fetchImpl);
+    const res = await runOverpass('q', { endpoints: fast, fetchImpl });
     expect(res.endpoint).toBe('c');
     expect(seen.filter((u) => u === 'a')).toHaveLength(2); // retried before moving on
   });
@@ -60,7 +60,7 @@ test.describe('Overpass mirror failover', () => {
     // This is the failure that shipped an empty map: an instance that is up and
     // returns valid JSON, but has no data loaded for the area.
     const fetchImpl = async (url) => (url === 'c' ? reply(ok) : reply({ elements: [] }));
-    const res = await runOverpass('q', fast, fetchImpl);
+    const res = await runOverpass('q', { endpoints: fast, fetchImpl });
     expect(res.endpoint).toBe('c');
     expect(res.json.elements).toHaveLength(1);
   });
@@ -68,20 +68,52 @@ test.describe('Overpass mirror failover', () => {
   test('rejects a mirror that reports a runtime error in a remark', async () => {
     const fetchImpl = async (url) =>
       (url === 'c' ? reply(ok) : reply({ remark: 'runtime error: query timed out', elements: [] }));
-    const res = await runOverpass('q', fast, fetchImpl);
+    const res = await runOverpass('q', { endpoints: fast, fetchImpl });
     expect(res.endpoint).toBe('c');
   });
 
   test('rejects an HTML error page served with a 200', async () => {
     const fetchImpl = async (url) => (url === 'c' ? reply(ok) : reply('<html>502 Bad Gateway</html>'));
-    const res = await runOverpass('q', fast, fetchImpl);
+    const res = await runOverpass('q', { endpoints: fast, fetchImpl });
     expect(res.endpoint).toBe('c');
   });
 
   test('reports every endpoint and reason when all of them fail', async () => {
     const fetchImpl = async () => reply({ elements: [] });
-    await expect(runOverpass('q', fast, fetchImpl)).rejects.toThrow(/Every Overpass endpoint failed/);
-    await expect(runOverpass('q', fast, fetchImpl)).rejects.toThrow(/zero elements/);
+    await expect(runOverpass('q', { endpoints: fast, fetchImpl })).rejects.toThrow(/Every Overpass endpoint failed/);
+    await expect(runOverpass('q', { endpoints: fast, fetchImpl })).rejects.toThrow(/zero elements/);
+  });
+
+  const withAge = (days) => ({
+    ...ok,
+    osm3s: { timestamp_osm_base: new Date(Date.now() - days * 86_400_000).toISOString() },
+  });
+
+  test('skips a mirror whose planet copy is months out of date', async () => {
+    // The real failure: overpass.kumi.systems answered with a complete, valid
+    // result built from a planet copy 82 days old, and it was committed.
+    const fetchImpl = async (url) => (url === 'c' ? reply(withAge(1)) : reply(withAge(82)));
+    const res = await runOverpass('q', { endpoints: fast, fetchImpl });
+    expect(res.endpoint).toBe('c');
+    expect(res.ageDays).toBeLessThan(2);
+    expect(res.stale).toBeUndefined();
+  });
+
+  test('falls back to the freshest mirror when every one is stale', async () => {
+    // Old data beats no data, but it must be flagged so validation can reject it.
+    const ages = { a: 90, b: 40, c: 120 };
+    const fetchImpl = async (url) => reply(withAge(ages[url]));
+    const res = await runOverpass('q', { endpoints: fast, fetchImpl });
+    expect(res.stale).toBe(true);
+    expect(res.endpoint).toBe('b');
+    expect(Math.round(res.ageDays)).toBe(40);
+  });
+
+  test('accepts a mirror that reports no planet timestamp at all', async () => {
+    const fetchImpl = async () => reply(ok);
+    const res = await runOverpass('q', { endpoints: fast, fetchImpl });
+    expect(res.endpoint).toBe('a');
+    expect(res.ageDays).toBeNull();
   });
 
   test('never writes an empty dataset even if a mirror slips through', () => {

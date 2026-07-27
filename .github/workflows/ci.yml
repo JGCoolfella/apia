@@ -27,10 +27,10 @@ jobs:
       - name: Browser tests
         run: npx playwright test --project=browser
 
+      # A real gate: this fails the build if the snapshot is stale, was produced
+      # by an older pipeline, or has broken geometry.
       - name: Validate the committed dataset
         run: npm run check
-        # Only meaningful once a snapshot has been generated.
-        continue-on-error: true
 
       - name: Production build
         run: npm run build

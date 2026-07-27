@@ -12,7 +12,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { BBOX } from '../src/config.js';
+import { BBOX, STALE_SNAPSHOT_DAYS, PIPELINE_VERSION } from '../src/config.js';
 import { CATEGORIES } from '../src/classify.js';
 import { joinHighlights } from '../src/format.js';
 
@@ -116,10 +116,22 @@ out('\nFreshness');
 if (meta.osm_data_timestamp) {
   const age = (Date.now() - new Date(meta.osm_data_timestamp)) / 86400000;
   out(`        OSM data as of ${meta.osm_data_timestamp} (${age.toFixed(1)} days old)`);
-  if (age > 30) warn('snapshot is more than a month old — consider `npm run fetch:data`');
-  else pass('snapshot is recent');
+  out(`        built from ${meta.endpoint || 'unknown endpoint'}`);
+  if (age > STALE_SNAPSHOT_DAYS) {
+    // A hard failure, not a warning. Overpass mirrors replicate independently
+    // and one of them served data 82 days behind the planet while looking
+    // perfectly healthy. A warning let that get committed; this stops it.
+    fail(`snapshot is ${age.toFixed(0)} days behind OpenStreetMap (limit ${STALE_SNAPSHOT_DAYS})`
+      + ' — the mirror it came from is lagging. Re-run `npm run fetch:data`.');
+  } else {
+    pass('snapshot is current');
+  }
 } else {
   warn('no OSM timestamp in meta.json');
+}
+
+if (meta.pipeline_version !== undefined && meta.pipeline_version !== PIPELINE_VERSION) {
+  fail(`snapshot was built by pipeline v${meta.pipeline_version}, code is v${PIPELINE_VERSION}`);
 }
 
 out(`\n${failures} failure(s), ${warnings} warning(s).\n`);

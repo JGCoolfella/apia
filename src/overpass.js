@@ -2,7 +2,7 @@
 // normalised GeoJSON the app renders. Shared by scripts/fetch-osm.mjs (Node) and
 // src/data.js (browser), so the snapshot and any live refresh are identical.
 
-import { BBOX } from './config.js';
+import { BBOX, OVERPASS_ENDPOINTS, MAX_OSM_AGE_DAYS } from './config.js';
 import { classify } from './classify.js';
 
 /** Overpass bbox filters are (south,west,north,east). */
@@ -233,18 +233,40 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * POST the query to each mirror in turn, returning the first genuine success.
  *
  * "Genuine" is doing real work here. Overpass mirrors fail in ways that still
- * look like HTTP 200: a `remark` field carrying a runtime error, or an empty
- * `elements` array from an instance that is up but has no data loaded. A query
- * over the whole of northern Upolu cannot legitimately match zero objects, so an
- * empty result is treated as a failed mirror and the next one is tried. Getting
- * this wrong writes a blank map that looks like a successful build.
+ * look like HTTP 200:
  *
- * @param {(url: string, attempt: number) => void} [onAttempt]
- * @param {(url: string, attempt: number, message: string) => void} [onFailure]
+ * - a `remark` field carrying a runtime error;
+ * - an empty `elements` array from an instance that is up but has no data
+ *   loaded (a query over the whole north coast of Upolu cannot legitimately
+ *   match nothing, so this is treated as a dead mirror);
+ * - a complete, plausible answer built from a planet copy that is months old.
+ *
+ * All three would otherwise produce a build that looks successful and is wrong.
+ * If every mirror is stale, the freshest is returned with `stale: true` rather
+ * than failing outright — old data beats no data, and validation downstream
+ * decides whether it is fit to commit.
+ *
+ * @param {string} query
+ * @param {object} [options]
+ * @param {string[]} [options.endpoints]
+ * @param {typeof fetch} [options.fetchImpl]
+ * @param {(url: string, attempt: number) => void} [options.onAttempt]
+ * @param {(url: string, attempt: number, message: string) => void} [options.onFailure]
+ * @param {number} [options.maxAgeDays]
+ * @param {number} [options.attempts]
  */
-export async function runOverpass(query, endpoints, fetchImpl = fetch, onAttempt, onFailure) {
+export async function runOverpass(query, options = {}) {
+  const {
+    endpoints = OVERPASS_ENDPOINTS,
+    fetchImpl = fetch,
+    onAttempt,
+    onFailure,
+    maxAgeDays = MAX_OSM_AGE_DAYS,
+    attempts: ATTEMPTS = 2,
+  } = options;
+
   const errors = [];
-  const ATTEMPTS = 2;
+  const stale = [];
 
   // Overpass asks that clients identify themselves. Browsers forbid setting
   // User-Agent, so only send it from Node.
@@ -283,7 +305,18 @@ export async function runOverpass(query, endpoints, fetchImpl = fetch, onAttempt
           throw new Error('returned zero elements - the mirror is up but has no data for this area');
         }
 
-        return { json, endpoint: url };
+        // How far behind the planet this mirror is. Absent on some instances,
+        // in which case we have to take the data at face value.
+        const base = json.osm3s?.timestamp_osm_base;
+        const ageDays = base ? (Date.now() - Date.parse(base)) / 86_400_000 : null;
+        if (ageDays !== null && Number.isFinite(ageDays) && ageDays > maxAgeDays) {
+          stale.push({ json, endpoint: url, ageDays });
+          throw new Error(
+            `data is ${ageDays.toFixed(0)} days behind the OSM planet (limit ${maxAgeDays}) - trying a fresher mirror`,
+          );
+        }
+
+        return { json, endpoint: url, ageDays };
       } catch (err) {
         const message = err.message || String(err);
         errors.push(`${url} (attempt ${attempt}/${ATTEMPTS}): ${message}`);
@@ -291,6 +324,14 @@ export async function runOverpass(query, endpoints, fetchImpl = fetch, onAttempt
         if (attempt < ATTEMPTS) await sleep(3000);
       }
     }
+  }
+
+  if (stale.length) {
+    stale.sort((a, b) => a.ageDays - b.ageDays);
+    const best = stale[0];
+    onFailure?.(best.endpoint, 0,
+      `every mirror is behind the planet; using the freshest (${best.ageDays.toFixed(0)} days old)`);
+    return { ...best, stale: true };
   }
 
   throw new Error(`Every Overpass endpoint failed:\n  ${errors.join('\n  ')}`);

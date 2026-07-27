@@ -46,8 +46,9 @@ export const IANA_TZ = 'Pacific/Apia'; // UTC+13 year-round; Samoa abolished DST
  *   1  initial extraction
  *   2  collapse OSM node/way duplicates of the same place
  *   3  restrict that merge to node+way pairs, with a wider radius for villages
+ *   4  reject Overpass mirrors lagging behind the planet
  */
-export const PIPELINE_VERSION = 3;
+export const PIPELINE_VERSION = 4;
 
 /**
  * Overpass mirrors, tried in order. The build script and the in-browser "refresh
@@ -60,6 +61,19 @@ export const OVERPASS_ENDPOINTS = [
   'https://overpass.osm.jp/api/interpreter',
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
 ];
+
+/**
+ * How far behind the OpenStreetMap planet a mirror may be before it is skipped.
+ *
+ * Mirrors replicate independently and some fall a long way behind while still
+ * serving complete, valid-looking results — one in this list answered with data
+ * 82 days old. For a map whose whole claim is currency, that is a silent
+ * failure, so freshness is checked as part of accepting a response.
+ */
+export const MAX_OSM_AGE_DAYS = 14;
+
+/** Age at which a committed snapshot fails validation outright. */
+export const STALE_SNAPSHOT_DAYS = 30;
 
 export const DATA_URL = 'data/apia.geojson';
 export const META_URL = 'data/meta.json';

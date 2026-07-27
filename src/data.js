@@ -76,13 +76,13 @@ export async function loadDataset() {
  */
 export async function refreshFromOSM(onProgress) {
   const query = buildQuery(BBOX);
-  const { json, endpoint } = await runOverpass(
-    query,
-    OVERPASS_ENDPOINTS,
-    fetch,
-    (url, attempt) => onProgress?.(`Querying ${new URL(url).host}${attempt > 1 ? ` (retry ${attempt})` : ''}...`),
-    (url) => onProgress?.(`${new URL(url).host} did not answer, trying the next mirror...`),
-  );
+  const { json, endpoint, stale } = await runOverpass(query, {
+    endpoints: OVERPASS_ENDPOINTS,
+    onAttempt: (url, attempt) =>
+      onProgress?.(`Querying ${new URL(url).host}${attempt > 1 ? ` (retry ${attempt})` : ''}...`),
+    onFailure: (url, attempt, message) =>
+      onProgress?.(`${new URL(url).host}: ${message}`),
+  });
   onProgress?.('Processing results...');
   const geojson = toGeoJSON(json);
   const meta = {
@@ -95,6 +95,7 @@ export async function refreshFromOSM(onProgress) {
     source: 'OpenStreetMap contributors',
     license: 'Open Database License (ODbL) 1.0',
     origin: 'live',
+    stale: stale || undefined,
   };
   writeCache(geojson, meta);
   return { geojson, meta, origin: 'live' };
