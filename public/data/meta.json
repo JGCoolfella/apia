@@ -1,0 +1,33 @@
+{
+  "generated": "2026-07-27T05:10:35.165Z",
+  "osm_data_timestamp": "2026-07-27T05:09:33Z",
+  "endpoint": "https://overpass-api.de/api/interpreter",
+  "bbox": {
+    "south": -13.95,
+    "west": -172.1,
+    "north": -13.7,
+    "east": -171.6
+  },
+  "feature_count": 2450,
+  "raw_element_count": 3167,
+  "counts": {
+    "sights": 63,
+    "shops": 368,
+    "places": 300,
+    "transport": 478,
+    "emergency": 13,
+    "stay": 94,
+    "gov": 100,
+    "health": 37,
+    "outdoors": 138,
+    "education": 120,
+    "money": 50,
+    "food": 110,
+    "worship": 369,
+    "services": 210
+  },
+  "source": "OpenStreetMap contributors",
+  "license": "Open Database License (ODbL) 1.0",
+  "license_url": "https://opendatacommons.org/licenses/odbl/",
+  "attribution": "(c) OpenStreetMap contributors"
+}
