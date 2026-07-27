@@ -1,0 +1,104 @@
+name: Deploy to AWS
+
+# Manual only — deploying is an outward-facing action, so it never fires on a
+# push. Run it from the Actions tab, or with the GitHub CLI.
+#
+# Credentials come from repository secrets, never from the workflow file and
+# never from a chat message. Two options, in order of preference:
+#
+#   1. OIDC (no long-lived keys at all). Create an IAM role trusting
+#      token.actions.githubusercontent.com for this repository and set the
+#      AWS_ROLE_ARN secret to its ARN.
+#   2. Access keys. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, plus
+#      AWS_SESSION_TOKEN if they are temporary STS credentials.
+#
+# The IAM principal needs: cloudformation:*, s3:* on the site bucket,
+# cloudfront:* on the distribution, acm:RequestCertificate/DescribeCertificate/
+# ListCertificates, and route53:ChangeResourceRecordSets/ListHostedZonesByName
+# on the target zone.
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: >-
+          Custom domain, e.g. apia.greendealer.co.nz. Leave blank to deploy on
+          the generated CloudFront domain. A bare apex replaces whatever that
+          domain currently serves — use a subdomain unless you mean it.
+        required: false
+        default: ''
+      region:
+        description: AWS region for the bucket and stack.
+        required: false
+        default: ap-southeast-2
+      refresh_data:
+        description: Pull fresh OpenStreetMap data before building.
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+  id-token: write        # required for OIDC
+
+concurrency:
+  group: deploy-aws
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Refresh OpenStreetMap data
+        if: inputs.refresh_data
+        run: npm run fetch:data
+
+      - name: Validate the dataset
+        # Refuses to publish a stale, malformed or wrong-pipeline snapshot.
+        run: npm run check
+
+      - name: Configure AWS credentials (OIDC)
+        if: vars.USE_OIDC == 'true' || secrets.AWS_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.region }}
+
+      - name: Configure AWS credentials (access keys)
+        if: secrets.AWS_ROLE_ARN == ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ inputs.region }}
+
+      - name: Deploy
+        env:
+          AWS_REGION: ${{ inputs.region }}
+          DOMAIN: ${{ inputs.domain }}
+        run: npm run deploy
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Apia map deploy"
+            echo ""
+            echo "- Region: \`${{ inputs.region }}\`"
+            echo "- Domain: \`${{ inputs.domain || 'CloudFront default' }}\`"
+            if [ -f public/data/meta.json ]; then
+              echo "- Places: $(node -e "console.log(require('./public/data/meta.json').feature_count)")"
+              echo "- OSM data: $(node -e "console.log(require('./public/data/meta.json').osm_data_timestamp)")"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
