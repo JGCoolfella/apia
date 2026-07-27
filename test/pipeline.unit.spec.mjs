@@ -152,6 +152,31 @@ test.describe('toGeoJSON', () => {
     expect(out.features[0].properties.wikidata).toBe('Q106628284');
   });
 
+  test('keeps two same-type features that share a name', () => {
+    // Real case: two church buildings 123 m apart in one village compound, both
+    // mapped as ways. Same OSM type means two real objects, not a duplicate —
+    // merging them would delete a building that exists.
+    const twoChurches = {
+      elements: [
+        { type: 'way', id: 5007, center: { lat: -13.8300, lon: -171.8000 }, tags: { name: 'Toamua Congregational Christian Church', amenity: 'place_of_worship' } },
+        { type: 'way', id: 5008, center: { lat: -13.8311, lon: -171.8000 }, tags: { name: 'Toamua Congregational Christian Church', amenity: 'place_of_worship' } },
+      ],
+    };
+    expect(toGeoJSON(twoChurches).features).toHaveLength(2);
+  });
+
+  test('does not merge same-named places that are far apart', () => {
+    // "Bank of the South Pacific" appears as a node and a way 24 km apart —
+    // two branches, not one place mapped twice.
+    const branches = {
+      elements: [
+        { type: 'node', id: 5009, lat: -13.8340, lon: -171.7650, tags: { name: 'Bank of the South Pacific', amenity: 'bank' } },
+        { type: 'way', id: 5010, center: { lat: -13.8300, lon: -172.0000 }, tags: { name: 'Bank of the South Pacific', amenity: 'bank' } },
+      ],
+    };
+    expect(toGeoJSON(branches).features).toHaveLength(2);
+  });
+
   test('never collapses unnamed features that share a fallback name', () => {
     // Two ATMs outside neighbouring banks both come through as "ATM". Merging
     // them would delete a real cash machine from the map.

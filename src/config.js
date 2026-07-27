@@ -45,8 +45,9 @@ export const IANA_TZ = 'Pacific/Apia'; // UTC+13 year-round; Samoa abolished DST
  *
  *   1  initial extraction
  *   2  collapse OSM node/way duplicates of the same place
+ *   3  restrict that merge to node+way pairs, with a wider radius for villages
  */
-export const PIPELINE_VERSION = 2;
+export const PIPELINE_VERSION = 3;
 
 /**
  * Overpass mirrors, tried in order. The build script and the in-browser "refresh

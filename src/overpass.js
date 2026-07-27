@@ -147,13 +147,24 @@ export function toGeoJSON(overpassJson) {
 
 /**
  * OpenStreetMap frequently holds one real-world place twice — a node for the POI
- * and a way for the building or area, both carrying the same name and tags.
- * Drawn straight onto a map that is two pins a few metres apart for one place.
+ * and a way for the building or area it sits in, both carrying the same name and
+ * tags. Drawn straight onto a map that is two pins for one place.
  *
- * Collapses features that share a folded name and category and sit within
- * DEDUPE_METRES of each other, keeping whichever carries more information.
+ * Merging is deliberately narrow, because deleting a real place is far worse
+ * than showing two pins:
+ *
+ * - Only a node paired with a way/relation is ever collapsed. Two features of
+ *   the *same* OSM type with the same name are two real objects — in this
+ *   dataset every such pair under 800 m turned out to be genuine (two church
+ *   buildings in one village compound, two branches of the same shop, a pair of
+ *   practice pitches). Those keep their own pins.
+ * - Villages get a wider radius than POIs, because a village node and the
+ *   centroid of the village area are legitimately far apart.
+ * - Unnamed features are never merged: two ATMs both called "ATM" are not
+ *   duplicates of each other.
  */
-const DEDUPE_METRES = 120;
+const DEDUPE_METRES = 400;
+const PLACE_DEDUPE_METRES = 1500;
 
 function dedupe(features) {
   const keepAsIs = [];
@@ -175,13 +186,22 @@ function dedupe(features) {
   for (const group of groups.values()) {
     if (group.length === 1) { keep.push(group[0]); continue; }
 
+    const limit = group[0].properties.cat === 'places' ? PLACE_DEDUPE_METRES : DEDUPE_METRES;
     const clusters = [];
     for (const f of group) {
-      const near = clusters.find((c) => metres(c[0].geometry.coordinates, f.geometry.coordinates) < DEDUPE_METRES);
+      const near = clusters.find((c) =>
+        c.some((g) => g.properties.osm_type !== f.properties.osm_type
+          && metres(g.geometry.coordinates, f.geometry.coordinates) < limit));
       if (near) near.push(f); else clusters.push([f]);
     }
     for (const cluster of clusters) {
-      keep.push(cluster.reduce((best, f) => (richness(f) > richness(best) ? f : best)));
+      // Keep the richest record, and prefer the node when tags are equal: a node
+      // sits on the entrance or the building itself, whereas a way's centre can
+      // land in the middle of a large compound.
+      keep.push(cluster.reduce((best, f) => {
+        if (richness(f) !== richness(best)) return richness(f) > richness(best) ? f : best;
+        return f.properties.osm_type === 'node' ? f : best;
+      }));
     }
   }
   return keep;
