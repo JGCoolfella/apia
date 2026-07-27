@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 import { classify } from '../src/classify.js';
 import { toGeoJSON, buildQuery, runOverpass } from '../src/overpass.js';
-import { evaluateHours, distanceMeters, formatDistance, joinHighlights, matchesWords } from '../src/format.js';
+import { evaluateHours, distanceMeters, formatDistance, joinHighlights, matchesWords, resolveWalk } from '../src/format.js';
 import { buildIndex, search, fold } from '../src/search.js';
 import { BBOX } from '../src/config.js';
 
@@ -442,5 +442,57 @@ test.describe('editorial join', () => {
   test('carries no coordinates of its own', () => {
     const text = JSON.stringify(curated);
     expect(text).not.toMatch(/"(lat|lon|lng|latitude|longitude|coordinates)"\s*:/);
+  });
+});
+
+test.describe('guided walks', () => {
+  const fc = toGeoJSON(sample);
+  const joined = joinHighlights(fc.features, curated.highlights);
+  const featureByHighlight = new Map(
+    [...joined].map(([fid, h]) => [h.id, fc.features.find((f) => f.properties.id === fid)]),
+  );
+
+  test('every walk stop references a highlight that exists', () => {
+    const ids = new Set(curated.highlights.map((h) => h.id));
+    for (const walk of curated.walks) {
+      for (const stop of walk.stops) {
+        expect(ids.has(stop.ref), `walk ${walk.id} references unknown highlight "${stop.ref}"`).toBe(true);
+      }
+    }
+  });
+
+  test('resolves stops through OSM joins with leg distances', () => {
+    // The fixture joins a subset of highlights; a walk resolves with whatever
+    // stops survived, in order, with straight-line legs.
+    const walk = {
+      id: 't', title: 'T',
+      stops: [{ ref: 'mulivai-cathedral', note: 'a' }, { ref: 'maketi-fou', note: 'b' }, { ref: 'palolo-deep', note: 'c' }],
+    };
+    const r = resolveWalk(walk, featureByHighlight);
+    expect(r).not.toBeNull();
+    expect(r.stops.length).toBeGreaterThanOrEqual(2);
+    expect(r.legs).toHaveLength(r.stops.length - 1);
+    expect(r.total).toBeGreaterThan(0);
+    for (const s of r.stops) expect(s.feature.geometry.coordinates).toHaveLength(2);
+  });
+
+  test('drops a stop whose highlight failed to join, silently', () => {
+    const walk = {
+      id: 't', title: 'T',
+      stops: [{ ref: 'mulivai-cathedral' }, { ref: 'does-not-exist' }, { ref: 'maketi-fou' }],
+    };
+    const r = resolveWalk(walk, featureByHighlight);
+    expect(r.stops.map((s) => s.ref)).toEqual(['mulivai-cathedral', 'maketi-fou']);
+  });
+
+  test('refuses to offer a walk with fewer than two real stops', () => {
+    // Half a walk is worse than no walk: one pin and a dangling line implies a
+    // route that does not exist.
+    const walk = { id: 't', title: 'T', stops: [{ ref: 'mulivai-cathedral' }, { ref: 'nope' }] };
+    expect(resolveWalk(walk, featureByHighlight)).toBeNull();
+  });
+
+  test('walks carry no coordinates of their own', () => {
+    expect(JSON.stringify(curated.walks)).not.toMatch(/"(lat|lon|lng|coordinates)"\s*:/);
   });
 });

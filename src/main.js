@@ -4,10 +4,19 @@
 // alias for `Map`, used here so the global `Map` constructor stays available.
 import {
   MapLibreMap, AttributionControl, NavigationControl, GeolocateControl,
-  ScaleControl, FullscreenControl, addProtocol,
+  ScaleControl, FullscreenControl, addProtocol, setWorkerUrl,
 } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+// maplibre 6 runs its tile/GeoJSON processing in a worker loaded from a
+// SEPARATE file, resolved relative to the library bundle at runtime. Left
+// alone, that file never makes it into a Vite build: the worker request 404s,
+// no source ever finishes loading, and the map renders no pins at all — while
+// everything else on the page works. `?worker&url` makes Vite bundle the worker
+// (with its own imports) as a real worker entry and hand back its final URL.
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { Protocol } from 'pmtiles';
+
+setWorkerUrl(maplibreWorkerUrl);
 
 import './styles.css';
 import { APIA_CENTER, DEFAULT_CENTER, DEFAULT_ZOOM, MAX_BOUNDS, IANA_TZ, STALE_SNAPSHOT_DAYS } from './config.js';
@@ -18,6 +27,7 @@ import { buildIndex, search } from './search.js';
 import {
   escapeHTML, distanceMeters, formatDistance, walkingTime, evaluateHours,
   telHref, osmLink, osmEditLink, directionsLinks, joinHighlights, currentApiaTime,
+  resolveWalk,
 } from './format.js';
 
 addProtocol('pmtiles', new Protocol().tile);
@@ -36,12 +46,21 @@ const state = {
   selectedId: null,
   userLocation: null,
   basemap: localStorage.getItem('apia-map:basemap') || DEFAULT_BASEMAP,
+  dimDark: localStorage.getItem('apia-map:dim-dark') !== 'off',
   searchHighlight: -1,
   searchMatches: [],
+  openNow: false,
+  sortMode: 'smart',        // 'smart' | 'near' | 'az'
+  walks: [],                // resolved walks (stops joined to OSM features)
+  walk: null,               // active resolved walk
+  walkStep: 0,
 };
 
-// Debug/test hook. Dev builds only — nothing is exposed in a production bundle.
-if (import.meta.env?.DEV) window.__apia = state;
+// Introspection hook, deliberately present in production too: it holds nothing
+// that is not already on screen, and it is what lets a deployed instance be
+// smoke-tested for the silent failures (worker missing, source never loading)
+// that this app has actually had.
+window.__apia = state;
 
 // ---------------------------------------------------------------------------
 // Boot
@@ -82,11 +101,21 @@ async function boot() {
   }
   state.index = buildIndex(state.all, aliasesFromHighlights(state.highlightById));
 
+  // Walks resolve through the same joins: a stop is only ever a real OSM
+  // object, and a walk that cannot muster two real stops is not offered.
+  const featureByHighlight = new Map(
+    [...state.highlightById].map(([fid, h]) => [h.id, state.byId.get(fid)]),
+  );
+  state.walks = (state.curated.walks || [])
+    .map((w) => resolveWalk(w, featureByHighlight))
+    .filter(Boolean);
+
   setLoading('Drawing the map…');
   initMap(initial);
   buildChips();
   wireUI();
   startClock();
+  showDataAge();
 
   if (dataset.origin === 'live') {
     toast('Loaded live data straight from OpenStreetMap.');
@@ -151,13 +180,25 @@ function initMap(initial) {
   map.addControl(new FullscreenControl(), 'bottom-right');
   map.getCanvas().setAttribute('tabindex', '0');
 
-  map.on('load', () => {
+  // Set up on style.load, not load: the map's `load` event also waits for the
+  // initial tiles, so a slow or unreachable tile server would hold the whole
+  // app hostage behind the loading screen. Pins, search and the list need none
+  // of that — tiles can stream in whenever they arrive.
+  map.once('style.load', () => {
     addPinImages(map);
     addLayers(map);
     applyFilter();
+    applyDarkDim();
     hideLoading();
     if (initial.sel && state.byId.has(initial.sel)) selectFeature(initial.sel, { fly: false });
+    if (initial.walk) {
+      const w = state.walks.find((x) => x.id === initial.walk);
+      if (w) startWalk(w.id, { step: initial.step ?? 0, fly: !initial.center });
+    }
   });
+
+  // Belt and braces: nothing should be able to leave the loading screen up.
+  setTimeout(hideLoading, 10_000);
 
   map.on('moveend', () => { renderList(); writeHash(); });
   map.on('click', 'poi', (e) => {
@@ -177,10 +218,45 @@ function initMap(initial) {
     if (hits.length === 0) closeDetail();
   });
 
-  for (const layer of ['poi', 'clusters']) {
+  for (const layer of ['poi', 'clusters', 'walk-stops']) {
     map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
   }
+
+  // Hover tooltip: pointer devices only — on touch it would just flicker.
+  if (window.matchMedia('(pointer: fine)').matches) {
+    const tip = $('#mapTooltip');
+    map.on('mousemove', 'poi', (e) => {
+      const p = e.features?.[0]?.properties;
+      if (!p?.name) { tip.hidden = true; return; }
+      const hours = evaluateHours(p.hours);
+      tip.innerHTML = `<strong>${escapeHTML(p.name)}</strong><span>${escapeHTML(p.kind || '')}` +
+        `${hours.state === 'open' ? ' · open' : hours.state === 'closed' ? ' · closed' : ''}</span>`;
+      tip.style.left = `${e.point.x}px`;
+      tip.style.top = `${e.point.y}px`;
+      tip.hidden = false;
+    });
+    map.on('mouseleave', 'poi', () => { tip.hidden = true; });
+    map.on('movestart', () => { tip.hidden = true; });
+  }
+
+  map.on('click', 'walk-stops', (e) => {
+    const idx = e.features?.[0]?.properties?.step;
+    if (idx !== undefined && state.walk) goToWalkStep(Number(idx));
+  });
+}
+
+/**
+ * In dark mode the standard OSM raster tiles glare. Dim and desaturate the
+ * raster layer itself (not the canvas, which would also recolour the pins).
+ */
+function applyDarkDim() {
+  const map = state.map;
+  if (!map?.getLayer('basemap')) return;
+  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches && state.dimDark;
+  map.setPaintProperty('basemap', 'raster-saturation', dark ? -0.7 : 0);
+  map.setPaintProperty('basemap', 'raster-brightness-max', dark ? 0.65 : 1);
+  map.setPaintProperty('basemap', 'raster-contrast', dark ? -0.05 : 0);
 }
 
 /**
@@ -226,6 +302,8 @@ function addPinImages(map) {
   }
 }
 
+const EMPTY_FC = { type: 'FeatureCollection', features: [] };
+
 function addLayers(map) {
   map.addSource('poi', {
     type: 'geojson',
@@ -266,6 +344,49 @@ function addLayers(map) {
       'text-allow-overlap': true,
     },
     paint: { 'text-color': '#ffffff' },
+  });
+
+  map.addSource('walk-line', { type: 'geojson', data: EMPTY_FC });
+  map.addSource('walk-stops', { type: 'geojson', data: EMPTY_FC });
+
+  // Stop-order line for the active walk. Dashed on purpose: it connects stops
+  // in sequence, it is not a routed path, and it should not look like one.
+  map.addLayer({
+    id: 'walk-line',
+    type: 'line',
+    source: 'walk-line',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: {
+      'line-color': '#0b6fb8',
+      'line-width': 3.5,
+      'line-opacity': 0.75,
+      'line-dasharray': [0.1, 2],
+    },
+  });
+
+  map.addLayer({
+    id: 'walk-stops',
+    type: 'circle',
+    source: 'walk-stops',
+    paint: {
+      'circle-radius': 13,
+      'circle-color': ['case', ['get', 'active'], '#0b6fb8', '#ffffff'],
+      'circle-stroke-color': ['case', ['get', 'active'], '#ffffff', '#0b6fb8'],
+      'circle-stroke-width': 2.5,
+    },
+  });
+
+  map.addLayer({
+    id: 'walk-stop-numbers',
+    type: 'symbol',
+    source: 'walk-stops',
+    layout: {
+      'text-field': ['to-string', ['+', ['get', 'step'], 1]],
+      'text-font': ['Noto Sans Medium'],
+      'text-size': 13,
+      'text-allow-overlap': true,
+    },
+    paint: { 'text-color': ['case', ['get', 'active'], '#ffffff', '#0b6fb8'] },
   });
 
   map.addLayer({
@@ -320,7 +441,9 @@ function switchBasemap(key) {
     addPinImages(map);
     addLayers(map);
     applyFilter();
+    applyDarkDim();
     if (state.selectedId) highlightOnMap(state.selectedId);
+    if (state.walk) applyWalkToMap();
   });
 }
 
@@ -329,7 +452,13 @@ function switchBasemap(key) {
 // ---------------------------------------------------------------------------
 
 function visibleFeatures() {
-  return state.all.filter((f) => state.active.has(f.properties.cat));
+  let out = state.all.filter((f) => state.active.has(f.properties.cat));
+  if (state.openNow) {
+    // Strictly places whose hours parse AND cover this moment. A place with no
+    // usable opening_hours is excluded — "might be open" is not "open".
+    out = out.filter((f) => evaluateHours(f.properties.hours).state === 'open');
+  }
+  return out;
 }
 
 function applyFilter() {
@@ -381,15 +510,24 @@ function renderList() {
   const centre = map.getCenter().toArray();
   const origin = state.userLocation || centre;
 
+  const sorters = {
+    smart: (a, b) => (a.f.properties.rank - b.f.properties.rank) || (a.d - b.d),
+    near: (a, b) => a.d - b.d,
+    az: (a, b) => a.f.properties.name.localeCompare(b.f.properties.name),
+  };
+
   const inView = visibleFeatures()
     .filter((f) => bounds.contains(f.geometry.coordinates))
     .map((f) => ({ f, d: distanceMeters(origin, f.geometry.coordinates) }))
-    .sort((a, b) => (a.f.properties.rank - b.f.properties.rank) || (a.d - b.d));
+    .sort(sorters[state.sortMode] || sorters.smart);
 
   $('#listCount').textContent = inView.length
-    ? `${inView.length}${inView.length > LIST_LIMIT ? '' : ''} place${inView.length === 1 ? '' : 's'}`
+    ? `${inView.length} place${inView.length === 1 ? '' : 's'}`
     : '';
-  $('#listTitle').textContent = state.userLocation ? 'In view — nearest first' : 'In view';
+  $('#listTitle').textContent =
+    state.openNow ? 'Open now, in view'
+    : state.sortMode === 'near' ? (state.userLocation ? 'Nearest to you' : 'Nearest map centre')
+    : 'In view';
   $('#listEmpty').hidden = inView.length > 0;
 
   list.innerHTML = inView.slice(0, LIST_LIMIT).map(({ f, d }) => {
@@ -447,6 +585,150 @@ function closeDetail() {
   $('#detail').hidden = true;
   highlightOnMap(null);
   renderList();
+  writeHash();
+}
+
+// ---------------------------------------------------------------------------
+// Guided walks
+// ---------------------------------------------------------------------------
+
+function openWalks() {
+  if (!state.walks.length) {
+    toast('No walks available — their stops are missing from the current dataset.');
+    return;
+  }
+  const items = state.walks.map((w) => `
+    <button class="opt" data-walk="${escapeHTML(w.id)}">
+      <span aria-hidden="true">${w.icon || '🥾'}</span>
+      <span>
+        <strong>${escapeHTML(w.title)}</strong>
+        <span>${w.stops.length} stops · ${formatDistance(w.total)} ${w.mode === 'drive' ? 'by road (as the crow flies)' : 'on foot'}</span>
+        <span>${escapeHTML(w.blurb)}</span>
+      </span>
+    </button>`).join('');
+
+  const dlg = openDialog('#walksDlg', 'Guided walks', `
+    ${items}
+    <p class="note">
+      Every stop is a real OpenStreetMap object, and the dashed line on the map
+      connects the stops <strong>in order</strong> — it is not turn-by-turn
+      routing. Distances are straight-line between stops, so the walking
+      distance on the ground is longer.
+    </p>`);
+
+  dlg.querySelectorAll('[data-walk]').forEach((btn) => {
+    btn.addEventListener('click', () => { dlg.close(); startWalk(btn.dataset.walk); });
+  });
+}
+
+function startWalk(id, { step = 0, fly = true } = {}) {
+  const walk = state.walks.find((w) => w.id === id);
+  if (!walk) return;
+  state.walk = walk;
+  state.walkStep = Math.min(Math.max(0, step), walk.stops.length - 1);
+  closeDetail();
+  applyWalkToMap();
+  renderWalkPanel();
+  if (fly) fitWalk();
+  if (window.matchMedia('(max-width: 860px)').matches) setSidebar(false);
+  writeHash();
+}
+
+function fitWalk() {
+  const coords = state.walk.stops.map((s) => s.feature.geometry.coordinates);
+  const lngs = coords.map((c) => c[0]);
+  const lats = coords.map((c) => c[1]);
+  state.map.fitBounds(
+    [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+    { padding: { top: 90, bottom: 180, left: 60, right: 60 }, duration: prefersReducedMotion() ? 0 : 900, maxZoom: 16 },
+  );
+}
+
+function applyWalkToMap() {
+  const map = state.map;
+  if (!map?.getSource('walk-line')) return;
+  const w = state.walk;
+  if (!w) {
+    map.getSource('walk-line').setData(EMPTY_FC);
+    map.getSource('walk-stops').setData(EMPTY_FC);
+    return;
+  }
+  map.getSource('walk-line').setData({
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates: w.stops.map((s) => s.feature.geometry.coordinates) },
+    properties: {},
+  });
+  map.getSource('walk-stops').setData({
+    type: 'FeatureCollection',
+    features: w.stops.map((s, i) => ({
+      type: 'Feature',
+      geometry: s.feature.geometry,
+      properties: { step: i, active: i === state.walkStep },
+    })),
+  });
+}
+
+function goToWalkStep(i) {
+  const w = state.walk;
+  if (!w) return;
+  state.walkStep = Math.min(Math.max(0, i), w.stops.length - 1);
+  applyWalkToMap();
+  renderWalkPanel();
+  const stop = w.stops[state.walkStep];
+  state.map.easeTo({
+    center: stop.feature.geometry.coordinates,
+    zoom: Math.max(state.map.getZoom(), 16),
+    duration: prefersReducedMotion() ? 0 : 600,
+  });
+  writeHash();
+}
+
+function renderWalkPanel() {
+  const w = state.walk;
+  const panel = $('#walkPanel');
+  if (!w) { panel.hidden = true; return; }
+
+  const i = state.walkStep;
+  const stop = w.stops[i];
+  const p = stop.feature.properties;
+  const legNext = i < w.legs.length
+    ? `${formatDistance(w.legs[i])} to the next stop`
+    : 'final stop';
+
+  panel.innerHTML = `
+    <div class="walk-head">
+      <span class="walk-title">${w.icon || '🥾'} ${escapeHTML(w.title)}</span>
+      <button class="icon-btn ghost" data-act="end" title="End walk"><span aria-hidden="true">✕</span><span class="sr-only">End walk</span></button>
+    </div>
+    <div class="walk-stop">
+      <span class="walk-n">${i + 1}</span>
+      <div class="walk-body">
+        <strong>${escapeHTML(p.name)}</strong>
+        <p>${escapeHTML(stop.note)}</p>
+        <small>${escapeHTML(p.kind)} · ${escapeHTML(legNext)}</small>
+      </div>
+    </div>
+    <div class="walk-nav">
+      <button class="btn" data-act="prev" ${i === 0 ? 'disabled' : ''}>← Back</button>
+      <span class="walk-progress">${i + 1} / ${w.stops.length}</span>
+      <button class="btn primary" data-act="next" ${i === w.stops.length - 1 ? 'disabled' : ''}>Next →</button>
+      <button class="btn" data-act="detail">Details</button>
+    </div>`;
+  panel.hidden = false;
+
+  panel.querySelector('[data-act="end"]').onclick = endWalk;
+  panel.querySelector('[data-act="prev"]').onclick = () => goToWalkStep(i - 1);
+  panel.querySelector('[data-act="next"]').onclick = () => goToWalkStep(i + 1);
+  panel.querySelector('[data-act="detail"]').onclick = () => {
+    selectFeature(p.id, { fly: false });
+  };
+}
+
+function endWalk() {
+  state.walk = null;
+  state.walkStep = 0;
+  $('#walkPanel').hidden = true;
+  applyWalkToMap();
   writeHash();
 }
 
@@ -569,13 +851,55 @@ function wireUI() {
   $('#guideBtn').addEventListener('click', openGuide);
   $('#layersBtn').addEventListener('click', openLayers);
   $('#dataBtn').addEventListener('click', openData);
+  $('#walksBtn').addEventListener('click', openWalks);
+
+  $('#openNowChip').addEventListener('click', () => {
+    state.openNow = !state.openNow;
+    $('#openNowChip').setAttribute('aria-pressed', String(state.openNow));
+    applyFilter();
+    if (state.openNow) {
+      const n = visibleFeatures().length;
+      toast(`${n.toLocaleString()} place${n === 1 ? '' : 's'} with hours saying open right now. Places with no usable hours are hidden.`);
+    }
+  });
+
+  $('#sortMode').addEventListener('change', (e) => {
+    state.sortMode = e.target.value;
+    if (state.sortMode === 'near' && !state.userLocation) {
+      // Nearest-to-you needs a location; nudge the geolocate control.
+      document.querySelector('.maplibregl-ctrl-geolocate')?.click();
+    }
+    renderList();
+  });
+
+  // Connection status: the map keeps working offline (cached tiles + local
+  // data), but the user deserves to know which world they are in.
+  const netDot = $('#netDot');
+  const setNet = () => {
+    const off = !navigator.onLine;
+    netDot.hidden = !off;
+    netDot.textContent = 'offline';
+    if (off) toast('You are offline. Cached areas and all place data still work.');
+  };
+  window.addEventListener('online', () => { netDot.hidden = true; toast('Back online.'); });
+  window.addEventListener('offline', setNet);
+  setNet();
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === '/' && document.activeElement?.tagName !== 'INPUT') {
-      e.preventDefault();
-      $('#searchInput').focus();
+    if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'SELECT') {
+      if (e.key === 'Escape') document.activeElement.blur();
+      return;
     }
-    if (e.key === 'Escape' && !document.querySelector('dialog[open]')) closeDetail();
+    if (e.key === '/') { e.preventDefault(); $('#searchInput').focus(); return; }
+    if (e.key === '?') { openHelp(); return; }
+    if (state.walk && !document.querySelector('dialog[open]')) {
+      if (e.key === 'ArrowRight' || e.key === 'n') { goToWalkStep(state.walkStep + 1); return; }
+      if (e.key === 'ArrowLeft' || e.key === 'p') { goToWalkStep(state.walkStep - 1); return; }
+    }
+    if (e.key === 'Escape' && !document.querySelector('dialog[open]')) {
+      if (state.selectedId) closeDetail();
+      else if (state.walk) endWalk();
+    }
   });
 
   window.addEventListener('hashchange', () => {
@@ -602,9 +926,26 @@ function wireSearch() {
     state.searchHighlight = -1;
   };
 
+  // One-tap searches for the things people actually stop and look for.
+  const QUICKS = [
+    ['💵', 'atm'], ['⛽', 'petrol'], ['💊', 'pharmacy'], ['🚌', 'bus stop'],
+    ['☕', 'cafe'], ['🏧', 'bank'], ['🏥', 'hospital'], ['🛒', 'supermarket'],
+  ];
+
+  const showQuicks = () => {
+    list.innerHTML = `<li class="search-quicks" role="presentation">
+      ${QUICKS.map(([icon, q]) =>
+        `<button class="chip" data-q="${escapeHTML(q)}">${icon} ${escapeHTML(q)}</button>`).join('')}
+      </li>
+      <li class="search-empty" role="presentation">Type to search ${state.all.length.toLocaleString()} places — English or Samoan spelling both work.</li>`;
+    list.hidden = false;
+    combo.setAttribute('aria-expanded', 'true');
+  };
+
   const run = () => {
     const q = input.value.trim();
     clear.hidden = q.length === 0;
+    if (q.length === 0) { showQuicks(); return; }
     if (q.length < 2) { close(); return; }
 
     const origin = state.userLocation || state.map?.getCenter().toArray() || APIA_CENTER;
@@ -634,7 +975,16 @@ function wireSearch() {
   };
 
   input.addEventListener('input', run);
-  input.addEventListener('focus', () => { if (input.value.trim().length >= 2) run(); });
+  input.addEventListener('focus', run);
+
+  list.addEventListener('click', (e) => {
+    const quick = e.target.closest('button[data-q]');
+    if (quick) {
+      input.value = quick.dataset.q;
+      input.focus();
+      run();
+    }
+  });
 
   input.addEventListener('keydown', (e) => {
     if (list.hidden) return;
@@ -736,6 +1086,11 @@ function openLayers() {
 
   const dlg = openDialog('#layersDlg', 'Basemap', `
     ${opts}
+    <button class="opt" data-toggle-dim aria-pressed="${state.dimDark}">
+      <span aria-hidden="true">🌙</span>
+      <span><strong>Dim the map in dark mode</strong>
+      <span>Desaturates and darkens the raster tiles when your system is in dark mode. Pins and labels are unaffected.</span></span>
+    </button>
     <p class="note">
       Streets and Terrain pull raster tiles from public tile servers, which is fine for personal use
       but not for a busy public site. Vector uses a Protomaps <code>.pmtiles</code> file you host
@@ -748,6 +1103,13 @@ function openLayers() {
       switchBasemap(btn.dataset.basemap);
       dlg.close();
     });
+  });
+
+  dlg.querySelector('[data-toggle-dim]').addEventListener('click', (e) => {
+    state.dimDark = !state.dimDark;
+    localStorage.setItem('apia-map:dim-dark', state.dimDark ? 'on' : 'off');
+    e.currentTarget.setAttribute('aria-pressed', String(state.dimDark));
+    applyDarkDim();
   });
 }
 
@@ -807,7 +1169,11 @@ function openData() {
       state.byId = new Map(state.all.map((f) => [f.properties.id, f]));
       state.highlightById = joinHighlights(state.all, state.curated.highlights);
       state.index = buildIndex(state.all, aliasesFromHighlights(state.highlightById));
+      const fbh = new Map([...state.highlightById].map(([fid, h]) => [h.id, state.byId.get(fid)]));
+      state.walks = (state.curated.walks || []).map((w) => resolveWalk(w, fbh)).filter(Boolean);
+      if (state.walk) endWalk();
       applyFilter();
+      showDataAge();
       dlg.close();
       toast(`Refreshed — ${state.all.length.toLocaleString()} places from OpenStreetMap.`);
     } catch (err) {
@@ -825,6 +1191,29 @@ function openData() {
 // ---------------------------------------------------------------------------
 // Odds and ends
 // ---------------------------------------------------------------------------
+
+function showDataAge() {
+  const el = $('#dataAge');
+  const ts = state.meta?.osm_data_timestamp;
+  if (!el || !ts) return;
+  const days = (Date.now() - new Date(ts)) / 86_400_000;
+  el.textContent = days < 1.5 ? 'data: today'
+    : days < 30 ? `data: ${Math.round(days)}d old`
+    : `data: ${Math.round(days)} days old ⚠`;
+  el.title = `OpenStreetMap snapshot taken ${new Date(ts).toLocaleString()}. Open the 🛰️ panel for details or to refresh.`;
+}
+
+function openHelp() {
+  openDialog('#helpDlg', 'Keyboard shortcuts', `
+    <dl class="kv">
+      <dt><kbd>/</kbd></dt><dd>Focus search</dd>
+      <dt><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Enter</kbd></dt><dd>Move through and pick search results</dd>
+      <dt><kbd>Esc</kbd></dt><dd>Close panels, end a walk</dd>
+      <dt><kbd>→</kbd> / <kbd>←</kbd></dt><dd>Next / previous walk stop</dd>
+      <dt><kbd>?</kbd></dt><dd>This help</dd>
+      <dt>Arrow keys, <kbd>+</kbd> <kbd>−</kbd></dt><dd>Pan and zoom the map when it has focus</dd>
+    </dl>`);
+}
 
 function startClock() {
   const el = $('#clock');
@@ -878,6 +1267,7 @@ function hashString({ sel } = {}) {
   const id = sel ?? state.selectedId;
   if (id) parts.push(`sel=${id}`);
   if (state.active.size !== CATEGORY_ORDER.length) parts.push(`cat=${[...state.active].join(',')}`);
+  if (state.walk) parts.push(`walk=${state.walk.id}&step=${state.walkStep}`);
   return `#${parts.join('&')}`;
 }
 
@@ -901,6 +1291,8 @@ function readHash() {
     }
     if (k === 'sel' && v) out.sel = v;
     if (k === 'cat' && v) out.cats = v.split(',').filter((c) => CATEGORIES[c]);
+    if (k === 'walk' && v) out.walk = v;
+    if (k === 'step' && v) out.step = Number(v) || 0;
   }
   return out;
 }

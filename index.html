@@ -40,7 +40,9 @@
     </div>
 
     <div class="topbar-actions">
+      <span id="netDot" class="net-dot" title="Connection status" hidden></span>
       <span id="clock" class="clock" title="Current local time in Apia (UTC+13)"></span>
+      <button id="walksBtn" class="icon-btn" title="Guided walks"><span class="i" aria-hidden="true">🥾</span><span class="sr-only">Guided walks</span></button>
       <button id="guideBtn" class="icon-btn" title="Know before you go"><span class="i" aria-hidden="true">ℹ️</span><span class="sr-only">Practical information</span></button>
       <button id="layersBtn" class="icon-btn" title="Basemap and layers"><span class="i" aria-hidden="true">🗺️</span><span class="sr-only">Basemap</span></button>
       <button id="dataBtn" class="icon-btn" title="Data source and freshness"><span class="i" aria-hidden="true">🛰️</span><span class="sr-only">Data source</span></button>
@@ -51,9 +53,23 @@
     <div class="filters" role="group" aria-label="Filter by category">
       <div class="filters-head">
         <h2>Categories</h2>
+        <span id="dataAge" class="data-age" title="When this map's OpenStreetMap snapshot was taken"></span>
         <button id="filterReset" class="link-btn">Show all</button>
       </div>
       <div id="chips" class="chips"></div>
+      <div class="filters-extra">
+        <button id="openNowChip" class="chip" role="switch" aria-pressed="false"
+                title="Only places whose opening hours say they are open right now. Places with no usable hours are hidden too.">
+          <span class="swatch" style="background:var(--ok)"></span>Open now
+        </button>
+        <label class="sort-label">Sort
+          <select id="sortMode" aria-label="Sort the place list">
+            <option value="smart">Notable first</option>
+            <option value="near">Nearest first</option>
+            <option value="az">A to Z</option>
+          </select>
+        </label>
+      </div>
     </div>
 
     <div class="list-head">
@@ -70,6 +86,10 @@
 
   <section id="detail" class="detail" hidden aria-live="polite"></section>
 
+  <section id="walkPanel" class="walk-panel" hidden aria-live="polite" aria-label="Guided walk"></section>
+
+  <div id="mapTooltip" class="map-tooltip" hidden aria-hidden="true"></div>
+
   <div id="loading" class="loading">
     <div class="spinner" aria-hidden="true"></div>
     <p id="loadingText">Loading Apia…</p>
@@ -81,6 +101,8 @@
 <dialog id="guideDlg" class="dlg"></dialog>
 <dialog id="layersDlg" class="dlg"></dialog>
 <dialog id="dataDlg" class="dlg"></dialog>
+<dialog id="walksDlg" class="dlg"></dialog>
+<dialog id="helpDlg" class="dlg"></dialog>
 
 <script type="module" src="/src/main.js"></script>
 </body>

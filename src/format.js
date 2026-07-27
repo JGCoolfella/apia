@@ -175,6 +175,39 @@ export function directionsLinks(coords, name) {
 }
 
 /**
+ * Resolve a curated walk against the editorial joins.
+ *
+ * A walk's stops reference highlight ids, and each highlight is already joined
+ * to a real OpenStreetMap object — so a walk carries no coordinates of its own
+ * and can only ever visit places OSM knows about. A stop whose highlight failed
+ * to join is silently dropped; a walk with fewer than two surviving stops is
+ * not offered at all, rather than shown half-broken.
+ *
+ * The line drawn between stops is straight-line stop order, NOT a routed path —
+ * the UI must say so.
+ *
+ * @param {object} walk from curated.json
+ * @param {Map<string, object>} featureByHighlight highlight id -> joined feature
+ */
+export function resolveWalk(walk, featureByHighlight) {
+  const stops = [];
+  for (const s of walk.stops || []) {
+    const feature = featureByHighlight.get(s.ref);
+    if (feature) stops.push({ feature, note: s.note || '', ref: s.ref });
+  }
+  if (stops.length < 2) return null;
+
+  const legs = [];
+  let total = 0;
+  for (let i = 1; i < stops.length; i++) {
+    const d = distanceMeters(stops[i - 1].feature.geometry.coordinates, stops[i].feature.geometry.coordinates);
+    legs.push(d);
+    total += d;
+  }
+  return { ...walk, stops, legs, total };
+}
+
+/**
  * Whole-word containment after folding. Plain substring matching is not safe
  * here: "vaea" appears inside "Lalovaea", which is a completely different place,
  * and Samoan place names share syllables constantly.

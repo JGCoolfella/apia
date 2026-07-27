@@ -194,14 +194,104 @@ test('works on a phone-sized viewport', async ({ page }) => {
   expect(overflow).toBeLessThanOrEqual(0);
 });
 
-test('map markers render on the canvas', async ({ page }) => {
+test('open-now filter narrows the list to places verifiably open', async ({ page }) => {
   await open(page);
-  // Query the live MapLibre instance for what it actually drew.
+  const results = page.locator('#results .result');
+  const before = await results.count();
+
+  await page.locator('#openNowChip').click();
+  await expect(page.locator('#openNowChip')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#listTitle')).toHaveText(/Open now/);
+
+  // Every remaining row must carry the Open badge — no "maybe open" entries.
+  const after = await results.count();
+  expect(after).toBeLessThan(before);
+  for (let i = 0; i < after; i++) {
+    await expect(results.nth(i).locator('.badge.open')).toBeVisible();
+  }
+
+  await page.locator('#openNowChip').click();
+  expect(await results.count()).toBe(before);
+});
+
+test('sort control reorders the list', async ({ page }) => {
+  await open(page);
+  await page.locator('#sortMode').selectOption('az');
+  const names = await page.locator('#results .res-name').allTextContents();
+  const cleaned = names.map((n) => n.replace(/Open|Closed|Pick/g, '').trim());
+  const sorted = [...cleaned].sort((a, b) => a.localeCompare(b));
+  expect(cleaned).toEqual(sorted);
+});
+
+test('quick-find chips appear on empty search focus and run a search', async ({ page }) => {
+  await open(page);
+  await page.locator('#searchInput').click();
+  const quicks = page.locator('.search-quicks .chip');
+  await expect(quicks.first()).toBeVisible();
+  await quicks.filter({ hasText: 'atm' }).click();
+  await expect(page.locator('#searchInput')).toHaveValue('atm');
+  await expect(page.locator('#searchResults [role="option"]').first()).toContainText('ATM');
+});
+
+test('a guided walk starts, steps through stops, and is honest about routing', async ({ page }) => {
+  await open(page);
+  await page.locator('#walksBtn').click();
+
+  const dlg = page.locator('#walksDlg');
+  await expect(dlg).toBeVisible();
+  await expect(dlg).toContainText('not turn-by-turn');
+  await dlg.locator('[data-walk]').first().click();
+
+  const panel = page.locator('#walkPanel');
+  await expect(panel).toBeVisible();
+  await expect(panel.locator('.walk-progress')).toHaveText(/1 \/ \d+/);
+  const firstStop = await panel.locator('.walk-body strong').textContent();
+
+  await panel.locator('[data-act="next"]').click();
+  await expect(panel.locator('.walk-progress')).toHaveText(/2 \/ \d+/);
+  expect(await panel.locator('.walk-body strong').textContent()).not.toBe(firstStop);
+
+  // The walk survives a reload via the URL.
+  await expect.poll(() => page.url()).toContain('walk=');
+  await page.goto(page.url());
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 20_000 });
+  await expect(page.locator('#walkPanel')).toBeVisible();
+  await expect(page.locator('#walkPanel .walk-progress')).toHaveText(/2 \/ \d+/);
+
+  await page.locator('#walkPanel [data-act="end"]').click();
+  await expect(page.locator('#walkPanel')).toBeHidden();
+});
+
+test('keyboard help opens with ?', async ({ page }) => {
+  await open(page);
+  await page.keyboard.press('?');
+  await expect(page.locator('#helpDlg')).toBeVisible();
+  await expect(page.locator('#helpDlg')).toContainText('Focus search');
+});
+
+test('data age is shown in the sidebar', async ({ page }) => {
+  await open(page);
+  await expect(page.locator('#dataAge')).toContainText(/data:/);
+});
+
+test('the map actually draws pins — worker loads and the source renders', async ({ page }) => {
+  await open(page);
+  // This must query what MapLibre RENDERED, not what the DOM contains. The
+  // failure it guards against: maplibre's separate worker file missing from
+  // the production bundle, in which case the whole page works, the list works,
+  // search works — and the map itself silently shows zero pins.
   const rendered = await page.evaluate(async () => {
-    await new Promise((r) => setTimeout(r, 1200));
-    const canvas = document.querySelector('#map canvas');
-    return { hasCanvas: !!canvas, width: canvas?.width || 0 };
+    const m = window.__apia.map;
+    const count = () => {
+      try {
+        return m.queryRenderedFeatures({ layers: ['poi', 'clusters'] }).length;
+      } catch { return 0; }
+    };
+    for (let i = 0; i < 100 && count() === 0; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return { features: count(), sourceLoaded: m.isSourceLoaded('poi') };
   });
-  expect(rendered.hasCanvas).toBe(true);
-  expect(rendered.width).toBeGreaterThan(0);
+  expect(rendered.sourceLoaded).toBe(true);
+  expect(rendered.features).toBeGreaterThan(0);
 });

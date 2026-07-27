@@ -430,6 +430,100 @@ a:hover { text-decoration-thickness: 2px; }
 
 .note { font-size: 13px; color: var(--fg-muted); background: var(--bg-sunk); padding: 11px 13px; border-radius: var(--radius-sm); }
 
+/* --- New controls: open-now, sort, data age, net dot ---------------------- */
+
+.filters-extra {
+  display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap;
+}
+.sort-label {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--fg-muted);
+}
+.sort-label select {
+  border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  background: var(--bg-raised); padding: 4px 6px; font-size: 12.5px; cursor: pointer;
+}
+.data-age {
+  font-size: 11px; color: var(--fg-faint); margin-left: auto; margin-right: 8px;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.net-dot {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: #fff; background: var(--danger); border-radius: 999px; padding: 3px 8px;
+}
+
+/* --- Map tooltip ---------------------------------------------------------- */
+
+.map-tooltip {
+  position: absolute; z-index: 28; pointer-events: none;
+  transform: translate(12px, -50%);
+  background: var(--bg-raised); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-md);
+  padding: 6px 10px; font-size: 12.5px; max-width: 240px;
+  display: flex; flex-direction: column; line-height: 1.3;
+}
+.map-tooltip strong { font-size: 13px; }
+.map-tooltip span { color: var(--fg-muted); font-size: 11.5px; }
+
+/* --- Walk panel ------------------------------------------------------------ */
+
+.walk-panel {
+  position: absolute;
+  left: 50%; transform: translateX(-50%);
+  bottom: 18px;
+  width: min(430px, calc(100vw - 24px));
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  z-index: 26;
+  animation: pop .16s ease-out;
+}
+#app[data-sidebar="open"] .walk-panel { left: calc(50% + var(--sidebar-w) / 2); }
+
+.walk-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px 8px; border-bottom: 1px solid var(--line);
+}
+.walk-title { font-weight: 650; font-size: 14px; }
+
+.walk-stop { display: flex; gap: 10px; padding: 12px; align-items: flex-start; }
+.walk-n {
+  flex: none; width: 28px; height: 28px; display: grid; place-items: center;
+  background: var(--accent); color: var(--accent-fg);
+  border-radius: 50%; font-weight: 700; font-size: 13px;
+}
+.walk-body { min-width: 0; }
+.walk-body strong { font-size: 14.5px; display: block; }
+.walk-body p { margin: 3px 0 4px; font-size: 13px; color: var(--fg-muted); }
+.walk-body small { color: var(--fg-faint); font-size: 12px; }
+
+.walk-nav {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 12px 12px;
+}
+.walk-nav .btn[disabled] { opacity: .4; cursor: default; }
+.walk-progress { font-size: 12px; color: var(--fg-faint); font-variant-numeric: tabular-nums; margin: 0 auto; }
+
+/* --- Search quicks --------------------------------------------------------- */
+
+.search-quicks {
+  display: flex; flex-wrap: wrap; gap: 6px; padding: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.search-quicks .chip { text-transform: capitalize; }
+
+kbd {
+  border: 1px solid var(--line-strong); border-bottom-width: 2px;
+  border-radius: 5px; background: var(--bg-sunk);
+  padding: 1px 6px; font-size: 12px; font-family: inherit;
+}
+
+@media (max-width: 860px) {
+  #app[data-sidebar="open"] .walk-panel { left: 50%; }
+  .walk-panel { bottom: calc(env(safe-area-inset-bottom) + 10px); z-index: 34; }
+}
+
 /* --- Loading & toast ----------------------------------------------------- */
 
 .loading {

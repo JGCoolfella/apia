@@ -19,6 +19,15 @@ export default defineConfig({
       },
     },
   },
+  worker: {
+    // The maplibre worker entry is an ES module (it imports its shared chunk).
+    format: 'es',
+  },
+  optimizeDeps: {
+    // Keep the dep optimizer away from maplibre so the worker's relative
+    // imports resolve against the real package files in dev.
+    exclude: ['maplibre-gl'],
+  },
   server: { port: 5173, host: true },
   preview: { port: 4173, host: true },
 });
