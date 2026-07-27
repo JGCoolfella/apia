@@ -1,7 +1,7 @@
 {
-  "generated": "2026-07-27T05:46:35.936Z",
+  "generated": "2026-07-27T17:03:14.539Z",
   "pipeline_version": 4,
-  "osm_data_timestamp": "2026-07-27T05:45:04Z",
+  "osm_data_timestamp": "2026-07-27T17:01:38Z",
   "endpoint": "https://overpass-api.de/api/interpreter",
   "bbox": {
     "south": -13.95,
