@@ -10,6 +10,11 @@ on:
   schedule:
     - cron: '0 15 * * 1'   # Mondays 15:00 UTC = Tuesday 04:00 in Apia (UTC+13)
   workflow_dispatch:
+  # Also bootstraps a branch that has no snapshot yet, so a fresh clone is never
+  # left with an empty map. See the guard below: on push it is a no-op once
+  # public/data/apia.geojson exists.
+  push:
+    branches: ['**']
 
 permissions:
   contents: write
@@ -20,20 +25,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Decide whether to fetch
+        id: decide
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [ -f public/data/apia.geojson ]; then
+            echo "A snapshot is already committed; nothing to bootstrap."
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@v4
+        if: steps.decide.outputs.run == 'true'
         with:
           node-version: '22'
           cache: npm
 
       - run: npm ci
+        if: steps.decide.outputs.run == 'true'
 
       - name: Fetch the Apia area from Overpass
+        if: steps.decide.outputs.run == 'true'
         run: npm run fetch:data
 
       - name: Validate what came back
+        if: steps.decide.outputs.run == 'true'
         run: npm run check
 
       - name: Commit if anything changed
+        if: steps.decide.outputs.run == 'true'
         run: |
           if git diff --quiet -- public/data/; then
             echo "No change in the OpenStreetMap data for Apia."
