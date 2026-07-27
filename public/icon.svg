@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Apia map">
+  <rect width="512" height="512" rx="113" fill="#0b6fb8"/>
+  <path fill="#ffffff" d="M256 62c-63.5 0-115 51.5-115 115 0 25.6 8.4 49.3 22.6 68.4L256 450l92.4-204.6C362.6 226.3 371 202.6 371 177c0-63.5-51.5-115-115-115z"/>
+  <circle cx="256" cy="175" r="46" fill="#0b6fb8"/>
+</svg>

@@ -1,0 +1,274 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Static hosting for the Apia interactive map: a private S3 bucket served through
+  CloudFront with Origin Access Control. No public bucket, no web server, and
+  byte-range support so a Protomaps .pmtiles basemap can be served straight from
+  the bucket.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: apia-map
+    Description: Prefix for resource names. Must be lowercase and DNS-safe.
+    AllowedPattern: '[a-z0-9][a-z0-9-]{1,40}'
+
+  PriceClass:
+    Type: String
+    Default: PriceClass_All
+    AllowedValues: [PriceClass_100, PriceClass_200, PriceClass_All]
+    Description: >
+      PriceClass_All is the only class that includes Australia and New Zealand
+      edge locations, which are the closest points of presence to Samoa. On a
+      low-traffic site the difference is cents; drop to PriceClass_100 only if
+      your audience is entirely US/Europe.
+
+  DomainName:
+    Type: String
+    Default: ''
+    Description: Optional custom domain, e.g. apia.example.com. Leave blank to use the CloudFront domain.
+
+  AcmCertificateArn:
+    Type: String
+    Default: ''
+    Description: >
+      ACM certificate ARN for DomainName. MUST be issued in us-east-1 —
+      CloudFront reads certificates from that region regardless of where this
+      stack is deployed. Leave blank if DomainName is blank.
+
+Conditions:
+  HasCustomDomain: !And
+    - !Not [!Equals [!Ref DomainName, '']]
+    - !Not [!Equals [!Ref AcmCertificateArn, '']]
+
+Resources:
+
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${ProjectName}-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleRules:
+        - Id: expire-noncurrent
+          Status: Enabled
+          NoncurrentVersionExpirationInDays: 30
+          AbortIncompleteMultipartUpload:
+            DaysAfterInitiation: 7
+
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${SiteBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt SiteBucket.Arn
+              - !Sub '${SiteBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${ProjectName}-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # Short TTL for the entry point so a deploy is visible quickly even before an
+  # invalidation completes. Hashed asset filenames carry the long cache instead.
+  HtmlCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub '${ProjectName}-html'
+        Comment: Short-lived cache for HTML and the service worker.
+        DefaultTTL: 60
+        MinTTL: 0
+        MaxTTL: 300
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          CookiesConfig: { CookieBehavior: none }
+          HeadersConfig: { HeaderBehavior: none }
+          QueryStringsConfig: { QueryStringBehavior: none }
+
+  DataCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub '${ProjectName}-data'
+        Comment: OpenStreetMap snapshot and editorial JSON - refreshed on redeploy.
+        DefaultTTL: 3600
+        MinTTL: 0
+        MaxTTL: 86400
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          CookiesConfig: { CookieBehavior: none }
+          HeadersConfig: { HeaderBehavior: none }
+          QueryStringsConfig: { QueryStringBehavior: none }
+
+  SecurityHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub '${ProjectName}-security-headers'
+        SecurityHeadersConfig:
+          ContentTypeOptions: { Override: true }
+          FrameOptions: { FrameOption: SAMEORIGIN, Override: true }
+          ReferrerPolicy: { ReferrerPolicy: strict-origin-when-cross-origin, Override: true }
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: true
+            Override: true
+          ContentSecurityPolicy:
+            Override: true
+            # MapLibre builds its workers from blob: URLs, and decodes tiles into
+            # canvases, hence blob: and data: in worker-src/img-src. The connect-src
+            # list is exactly the tile, font and Overpass hosts the app can call.
+            ContentSecurityPolicy: >-
+              default-src 'self';
+              base-uri 'self';
+              object-src 'none';
+              form-action 'self';
+              frame-ancestors 'self';
+              script-src 'self' blob:;
+              worker-src 'self' blob:;
+              child-src 'self' blob:;
+              style-src 'self' 'unsafe-inline';
+              img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.opentopomap.org;
+              font-src 'self' data:;
+              connect-src 'self' blob:
+                https://tile.openstreetmap.org
+                https://*.tile.opentopomap.org
+                https://fonts.openmaptiles.org
+                https://overpass-api.de
+                https://overpass.kumi.systems
+                https://overpass.private.coffee
+                https://overpass.osm.ch;
+              upgrade-insecure-requests
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub '${ProjectName} - interactive map of Apia, Samoa'
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: !Ref PriceClass
+        Aliases: !If [HasCustomDomain, [!Ref DomainName], !Ref 'AWS::NoValue']
+        ViewerCertificate: !If
+          - HasCustomDomain
+          - AcmCertificateArn: !Ref AcmCertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
+
+        Origins:
+          - Id: s3-origin
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+
+        DefaultCacheBehavior:
+          TargetOriginId: s3-origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD, OPTIONS]
+          Compress: true
+          CachePolicyId: !Ref HtmlCachePolicy
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+
+        CacheBehaviors:
+          # Vite emits content-hashed filenames here, so these are immutable.
+          - PathPattern: /assets/*
+            TargetOriginId: s3-origin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # Managed-CachingOptimized
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+
+          # .pmtiles is read with HTTP range requests. Compression must stay off:
+          # a compressed response cannot be range-served correctly.
+          - PathPattern: /basemap/*
+            TargetOriginId: s3-origin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            Compress: false
+            CachePolicyId: b2884449-e4de-46a7-ac36-70bc7f1ddd6d  # Managed-CachingOptimizedForUncompressedObjects
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+
+          - PathPattern: /data/*
+            TargetOriginId: s3-origin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: !Ref DataCachePolicy
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+
+        # Single-page app: unknown paths fall back to the entry point rather
+        # than showing S3's XML error document.
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+
+Outputs:
+  BucketName:
+    Description: S3 bucket to sync the built site into.
+    Value: !Ref SiteBucket
+    Export:
+      Name: !Sub '${ProjectName}-bucket'
+
+  DistributionId:
+    Description: CloudFront distribution id, used for invalidations.
+    Value: !Ref Distribution
+    Export:
+      Name: !Sub '${ProjectName}-distribution'
+
+  SiteURL:
+    Description: Public URL of the map.
+    Value: !If
+      - HasCustomDomain
+      - !Sub 'https://${DomainName}'
+      - !Sub 'https://${Distribution.DomainName}'

@@ -1,0 +1,90 @@
+{
+  "_comment": "SYNTHETIC TEST FIXTURE — not real map data. Shaped like an Overpass API response so the tests exercise the same toGeoJSON() pipeline the real fetch uses. Coordinates are arbitrary points inside the Apia bounding box and must never be used as a data source.",
+  "version": 0.6,
+  "generator": "test fixture",
+  "osm3s": { "timestamp_osm_base": "2026-07-20T00:00:00Z" },
+  "elements": [
+    {
+      "type": "node", "id": 1001, "lat": -13.8340, "lon": -171.7640,
+      "tags": {
+        "name": "Immaculate Conception of Mary Cathedral", "amenity": "place_of_worship",
+        "denomination": "roman_catholic", "religion": "christian", "addr:street": "Beach Road"
+      }
+    },
+    {
+      "type": "way", "id": 2002, "center": { "lat": -13.8510, "lon": -171.7710 },
+      "tags": {
+        "name": "Robert Louis Stevenson Museum", "tourism": "museum",
+        "opening_hours": "Mo-Fr 09:00-16:00; Sa 09:00-12:00",
+        "website": "https://www.rlsmuseum.org/", "phone": "+685 20798"
+      }
+    },
+    {
+      "type": "node", "id": 1003, "lat": -13.8375, "lon": -171.7695,
+      "tags": { "name": "Maketi Fou", "amenity": "marketplace", "opening_hours": "Mo-Sa 06:00-18:00" }
+    },
+    {
+      "type": "node", "id": 1004, "lat": -13.8318, "lon": -171.7602,
+      "tags": { "name": "Palolo Deep Marine Reserve", "leisure": "nature_reserve" }
+    },
+    {
+      "type": "node", "id": 1005, "lat": -13.8352, "lon": -171.7668,
+      "tags": { "name": "Bank of South Pacific", "amenity": "bank", "atm": "yes", "opening_hours": "Mo-Fr 09:00-15:00" }
+    },
+    {
+      "type": "node", "id": 1006, "lat": -13.8349, "lon": -171.7671,
+      "tags": { "amenity": "atm", "operator": "ANZ" }
+    },
+    {
+      "type": "way", "id": 2007, "center": { "lat": -13.8395, "lon": -171.7745 },
+      "tags": { "name": "Tupua Tamasese Meaole Hospital", "amenity": "hospital", "emergency": "yes" }
+    },
+    {
+      "type": "node", "id": 1008, "lat": -13.8329, "lon": -171.7655,
+      "tags": { "name": "Apia Clock Tower", "historic": "memorial" }
+    },
+    {
+      "type": "node", "id": 1009, "lat": -13.8301, "lon": -171.7712,
+      "tags": { "name": "Samoa Cultural Village", "tourism": "attraction" }
+    },
+    {
+      "type": "way", "id": 2010, "center": { "lat": -13.8296, "lon": -172.0086 },
+      "tags": { "name": "Faleolo International Airport", "aeroway": "aerodrome", "iata": "APW", "icao": "NSFA" }
+    },
+    {
+      "type": "node", "id": 1011, "lat": -13.8368, "lon": -171.7688,
+      "tags": { "name": "Savalalo Flea Market", "amenity": "marketplace" }
+    },
+    {
+      "type": "node", "id": 1012, "lat": -13.8362, "lon": -171.7683,
+      "tags": { "highway": "bus_stop", "name": "Savalalo Terminal" }
+    },
+    {
+      "type": "node", "id": 1013, "lat": -13.8347, "lon": -171.7659,
+      "tags": {
+        "name": "Amanaki Café", "amenity": "cafe", "cuisine": "coffee_shop",
+        "opening_hours": "Mo-Fr 07:00-17:00", "name:sm": "Fale Kofe Amanaki"
+      }
+    },
+    {
+      "type": "node", "id": 1014, "lat": -13.8288, "lon": -171.7573,
+      "tags": { "name": "Vaiala Beach", "natural": "beach" }
+    },
+    {
+      "type": "node", "id": 1015, "lat": -13.8357, "lon": -171.7702,
+      "tags": { "name": "Samoa Police Headquarters", "amenity": "police" }
+    },
+    {
+      "type": "node", "id": 1016, "lat": -13.8331, "lon": -171.7648,
+      "tags": { "name": "Tanoa Tusitala Hotel", "tourism": "hotel", "stars": "4" }
+    },
+    {
+      "type": "node", "id": 9001, "lat": -13.8400, "lon": -171.7800,
+      "tags": { "barrier": "gate" }
+    },
+    {
+      "type": "node", "id": 9002, "lat": -13.8401, "lon": -171.7801,
+      "tags": { "amenity": "bench" }
+    }
+  ]
+}

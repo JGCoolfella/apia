@@ -1,0 +1,52 @@
+name: Refresh OpenStreetMap data
+
+# Keeps the committed snapshot current. OpenStreetMap in Samoa changes steadily —
+# new businesses, corrected names, the Savalalo terminal rebuild — so a map built
+# once and left alone goes stale within months.
+#
+# Runs weekly, and on demand from the Actions tab.
+
+on:
+  schedule:
+    - cron: '0 15 * * 1'   # Mondays 15:00 UTC = Tuesday 04:00 in Apia (UTC+13)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Fetch the Apia area from Overpass
+        run: npm run fetch:data
+
+      - name: Validate what came back
+        run: npm run check
+
+      - name: Commit if anything changed
+        run: |
+          if git diff --quiet -- public/data/; then
+            echo "No change in the OpenStreetMap data for Apia."
+            exit 0
+          fi
+
+          COUNT=$(node -e "console.log(require('./public/data/meta.json').feature_count)")
+          OSM_TS=$(node -e "console.log(require('./public/data/meta.json').osm_data_timestamp)")
+
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add public/data/apia.geojson public/data/meta.json
+          git commit -m "data: refresh Apia OpenStreetMap snapshot
+
+          ${COUNT} places, OSM data as of ${OSM_TS}."
+          git push

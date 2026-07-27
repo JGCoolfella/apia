@@ -1,0 +1,26 @@
+{
+  "name": "apia-map",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "An accurate, user-friendly interactive map of Apia, Samoa, built on OpenStreetMap data.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "fetch:data": "node scripts/fetch-osm.mjs",
+    "fetch:basemap": "bash scripts/fetch-basemap.sh",
+    "build:icons": "node scripts/make-icons.mjs",
+    "check": "node scripts/check-data.mjs",
+    "deploy": "bash infra/deploy.sh"
+  },
+  "dependencies": {
+    "maplibre-gl": "^6.0.0",
+    "pmtiles": "^4.4.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0",
+    "vite": "^8.1.5"
+  }
+}

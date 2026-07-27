@@ -1,0 +1,18 @@
+{
+  "name": "Apia, Samoa — interactive map",
+  "short_name": "Apia Map",
+  "description": "An interactive map of Apia, Samoa, built on OpenStreetMap data. Works offline once loaded.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#ffffff",
+  "theme_color": "#0b6fb8",
+  "categories": ["travel", "navigation", "maps"],
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

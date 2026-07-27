@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5" />
+<meta name="description" content="An interactive map of Apia, Samoa. Places, transport, money, health and sights, built on live OpenStreetMap data." />
+<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)" />
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+<meta name="color-scheme" content="light dark" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" href="icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<title>Apia, Samoa — interactive map</title>
+</head>
+<body>
+<a class="skip-link" href="#results">Skip to place list</a>
+
+<div id="app" data-sidebar="open">
+
+  <header class="topbar">
+    <button id="sidebarToggle" class="icon-btn" aria-expanded="true" aria-controls="sidebar" title="Show or hide the place list">
+      <span class="i" aria-hidden="true">☰</span><span class="sr-only">Toggle place list</span>
+    </button>
+
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">🇼🇸</span>
+      <span class="brand-text">
+        <strong>Apia</strong>
+        <small>Sāmoa</small>
+      </span>
+    </div>
+
+    <div class="search" role="combobox" aria-expanded="false" aria-owns="searchResults" aria-haspopup="listbox">
+      <span class="search-icon" aria-hidden="true">🔎</span>
+      <input id="searchInput" type="search" placeholder="Search Apia — places, banks, food, buses…"
+             autocomplete="off" autocapitalize="off" spellcheck="false"
+             aria-controls="searchResults" aria-autocomplete="list" aria-label="Search places in Apia" />
+      <button id="searchClear" class="icon-btn ghost" hidden title="Clear search"><span aria-hidden="true">✕</span><span class="sr-only">Clear search</span></button>
+      <ul id="searchResults" class="search-results" role="listbox" hidden></ul>
+    </div>
+
+    <div class="topbar-actions">
+      <span id="clock" class="clock" title="Current local time in Apia (UTC+13)"></span>
+      <button id="guideBtn" class="icon-btn" title="Know before you go"><span class="i" aria-hidden="true">ℹ️</span><span class="sr-only">Practical information</span></button>
+      <button id="layersBtn" class="icon-btn" title="Basemap and layers"><span class="i" aria-hidden="true">🗺️</span><span class="sr-only">Basemap</span></button>
+      <button id="dataBtn" class="icon-btn" title="Data source and freshness"><span class="i" aria-hidden="true">🛰️</span><span class="sr-only">Data source</span></button>
+    </div>
+  </header>
+
+  <aside id="sidebar" aria-label="Places">
+    <div class="filters" role="group" aria-label="Filter by category">
+      <div class="filters-head">
+        <h2>Categories</h2>
+        <button id="filterReset" class="link-btn">Show all</button>
+      </div>
+      <div id="chips" class="chips"></div>
+    </div>
+
+    <div class="list-head">
+      <h2 id="listTitle">In view</h2>
+      <span id="listCount" class="count"></span>
+    </div>
+
+    <ul id="results" class="results" tabindex="-1" aria-labelledby="listTitle"></ul>
+
+    <p id="listEmpty" class="empty" hidden>Nothing here yet — zoom out, pan the map, or turn a category back on.</p>
+  </aside>
+
+  <main id="map" aria-label="Map of Apia. Use arrow keys to pan and plus or minus to zoom."></main>
+
+  <section id="detail" class="detail" hidden aria-live="polite"></section>
+
+  <div id="loading" class="loading">
+    <div class="spinner" aria-hidden="true"></div>
+    <p id="loadingText">Loading Apia…</p>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</div>
+
+<dialog id="guideDlg" class="dlg"></dialog>
+<dialog id="layersDlg" class="dlg"></dialog>
+<dialog id="dataDlg" class="dlg"></dialog>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,234 @@
+{
+  "_comment": "Editorial layer. This file deliberately contains NO coordinates. Every position on the map comes from OpenStreetMap; entries here are matched to OSM features by name at runtime and only add context. 'checked' is the date the practical information below was last verified against the linked sources.",
+  "checked": "2026-07-27",
+
+  "essentials": [
+    {
+      "id": "emergency",
+      "icon": "🚨",
+      "title": "Emergency: dial 911",
+      "body": "One number for police, fire and ambulance. Calls are dispatched from the National Emergency Call Centre at Samoa Fire and Emergency Services headquarters in Apia. The single 911 number replaced the old separate service numbers in January 2018.",
+      "sources": [
+        { "label": "Samoa Tourism Authority", "url": "https://www.samoa.travel/samoa-travel-advice/in-an-emergency-dial-911/" },
+        { "label": "Samoa Fire & Emergency Services", "url": "https://www.sfesa.ws/" }
+      ]
+    },
+    {
+      "id": "time",
+      "icon": "🕓",
+      "title": "Time: UTC+13, all year",
+      "body": "Samoa sits at UTC+13 and has not observed daylight saving since 2021, so there is no seasonal clock change. Samoa is west of the International Date Line — it shares a calendar date with New Zealand and Australia, and is a day ahead of American Samoa, 40 km away.",
+      "sources": [
+        { "label": "time.is — Samoa", "url": "https://time.is/Samoa" }
+      ]
+    },
+    {
+      "id": "money",
+      "icon": "💵",
+      "title": "Money: Samoan tālā (WST)",
+      "body": "Cash still rules outside the main hotels and supermarkets. Apia has the densest concentration of banks and ATMs in the country — turn on the Money layer to see them. Draw what you need before heading out to the villages or across to Savaiʻi. Tipping is not a Samoan custom.",
+      "sources": []
+    },
+    {
+      "id": "driving",
+      "icon": "🚗",
+      "title": "Driving: keep left",
+      "body": "Samoa switched from right-hand to left-hand traffic in September 2009 and is the only country in the Pacific to have made the change in modern times. Roughly 40 km/h through Apia and the villages, around 55 km/h on the open road. Visitors need their home licence plus a temporary Samoan permit, normally arranged by the rental agent. Watch for dogs, pigs and pedestrians on village roads at all hours.",
+      "sources": [
+        { "label": "Samoa Tourism Authority — road rules", "url": "https://www.samoa.travel/pagepreview/road-rules" }
+      ]
+    },
+    {
+      "id": "sunday",
+      "icon": "⛪",
+      "title": "Sundays and sā (evening prayer)",
+      "body": "Sunday is genuinely quiet: most shops and many restaurants close, and church is the centre of the day. In villages, a bell or conch marks sā, the early-evening prayer curfew — if you are walking or driving through a village when it sounds, stop and wait the few minutes until it lifts. Dress modestly away from resorts, and cover up when passing through a village.",
+      "sources": []
+    },
+    {
+      "id": "entry",
+      "icon": "🛂",
+      "title": "Entry: 90-day visitor permit on arrival",
+      "body": "Citizens of most countries are issued a free 90-day Visitor's Permit on arrival, subject to holding a passport valid at least six months and an onward or return ticket. Extensions are lodged at the Immigration Office in Apia before the permit expires. Confirm your own nationality's position with an official source before travelling.",
+      "sources": [
+        { "label": "Samoa High Commission — immigration", "url": "https://samoa.org.nz/visa-passport/" }
+      ]
+    },
+    {
+      "id": "buses",
+      "icon": "🚌",
+      "title": "Buses: cash, and no timetable",
+      "body": "Apia's wooden-bodied buses run from two terminals — beside Maketi Fou (Fugalei Market) and at Savalalo, behind the flea market off Mulinuʻu Road. There is no published timetable; buses leave when full and thin out sharply in the afternoon and barely run on Sunday. You pay the driver in cash as you get off, and fares around Apia are a few tālā.",
+      "sources": [
+        { "label": "Samoa Tourism Authority — taking a bus", "url": "https://www.samoa.travel/plan-book/getting-around-samoa/taking-a-bus/" }
+      ]
+    },
+    {
+      "id": "airport",
+      "icon": "✈️",
+      "title": "Airport: Faleolo (APW), west of town",
+      "body": "Faleolo International is about 35 km west of Apia along the north coast — budget 45 to 60 minutes by road, more in morning traffic. Fagaliʻi Airfield, a few minutes east of the centre, has opened and closed repeatedly over the past decade; check its current status before assuming a flight uses it.",
+      "sources": [
+        { "label": "Samoa Airport Authority", "url": "https://www.samoaairports.com/airports/faleolo-international-airport" }
+      ]
+    },
+    {
+      "id": "ferry",
+      "icon": "⛴️",
+      "title": "Savaiʻi ferry: Mulifanua – Salelologa",
+      "body": "The inter-island ferry runs from Mulifanua wharf at the far west of Upolu, next to Faleolo, across to Salelologa on Savaiʻi. Sailings are operated by the Samoa Shipping Corporation and the crossing takes roughly an hour to ninety minutes. Vehicle space is limited and sailings change with weather and season — check the day before.",
+      "sources": []
+    },
+    {
+      "id": "weather",
+      "icon": "🌧️",
+      "title": "Wet season and cyclones",
+      "body": "Samoa is tropical year round. The wetter, more humid season runs roughly November to April, which is also the South Pacific cyclone season; May to October is drier and slightly cooler. Heavy rain can flood the Vaisigano River and low-lying parts of central Apia within an hour.",
+      "sources": []
+    }
+  ],
+
+  "notices": [
+    {
+      "id": "savalalo-terminal",
+      "title": "Savalalo bus terminal is being rebuilt",
+      "body": "Work to upgrade the Savalalo bus terminal began in February 2026, starting with the removal of the old shelters and the vendor stalls around the site. The government allocated around WST$3 million, and the intention is for the area to serve buses only, with vendors relocating to a new flea market facility. Expect bus stands, stalls and traffic around Savalalo and Mulinuʻu Road to differ from what is mapped.",
+      "since": "2026-02",
+      "sources": [
+        { "label": "Talamua Online", "url": "https://talamua.com/?p=56402" }
+      ]
+    },
+    {
+      "id": "waterfront",
+      "title": "Apia waterfront redevelopment",
+      "body": "Beach Road and the harbour frontage are covered by the Apia Waterfront Plan 2017–2026, a staged programme of seawall, public space and road work along the central waterfront. Sections of the foreshore have been reshaped over the life of the plan, so mapped paths and frontages near Beach Road may be out of date.",
+      "since": "2017",
+      "sources": [
+        { "label": "Waterfront Plan 2017–2026 (Ministry of Works, Transport & Infrastructure)", "url": "https://www.mwti.gov.ws/wp-content/uploads/2022/09/Waterfront-Plan-2017-2026.pdf" }
+      ]
+    }
+  ],
+
+  "highlights": [
+    {
+      "id": "rls-museum",
+      "match": ["robert louis stevenson", "vailima museum", "villa vailima"],
+      "blurb": "The house Robert Louis Stevenson built in 1890 and lived in until his death in 1894, restored as a museum. Samoans knew him as Tusitala, 'teller of tales'.",
+      "tip": "The trail up Mount Vāea to his tomb starts near the museum grounds — steep, humid, and worth it for the view over Apia."
+    },
+    {
+      "id": "mt-vaea",
+      "match": ["vaea"],
+      "blurb": "The forested hill behind Vailima. Stevenson's tomb sits on the summit, reached by a walking track of roughly 30–60 minutes depending on which route you take.",
+      "tip": "Go early. There is no shade on the ridge and the afternoon heat is punishing."
+    },
+    {
+      "id": "mulivai-cathedral",
+      "match": ["immaculate conception", "mulivai cathedral", "cathedral of the immaculate"],
+      "blurb": "The Catholic cathedral on Beach Road and the defining silhouette of the Apia waterfront. The current building replaced the 19th-century cathedral on the same site and was reconsecrated in 2014.",
+      "tip": "Visitors are welcome outside services. Cover shoulders and knees."
+    },
+    {
+      "id": "clock-tower",
+      "match": ["clock tower"],
+      "blurb": "The Apia clock tower stands on the roundabout at the centre of the waterfront, built as a memorial to Samoans who served in the First World War. It is the landmark locals give directions from.",
+      "tip": null
+    },
+    {
+      "id": "maketi-fou",
+      "match": ["maketi fou", "fugalei market", "fugalei"],
+      "blurb": "Apia's main produce market — taro, breadfruit, bananas, coconuts, kava and cooked food, under one big roof. Busiest and best early in the morning.",
+      "tip": "One of the two main bus terminals sits alongside it."
+    },
+    {
+      "id": "fish-market",
+      "match": ["fish market"],
+      "blurb": "The harbourside fish market, at its best not long after dawn when the boats come in — tuna, reef fish, octopus and oka (raw fish in coconut cream).",
+      "tip": null
+    },
+    {
+      "id": "flea-market",
+      "match": ["flea market", "savalalo"],
+      "blurb": "The handicraft and souvenir market at Savalalo: siapo (bark cloth), carvings, shell work, lavalava and printed cloth.",
+      "tip": "The terminal beside it is being rebuilt through 2026 — see the notices panel."
+    },
+    {
+      "id": "palolo-deep",
+      "match": ["palolo deep"],
+      "blurb": "A marine reserve at the eastern end of the harbour where the reef flat drops away into a deep blue hole. The best snorkelling within walking distance of central Apia.",
+      "tip": "Go at high tide — at low tide the walk out across the reef flat is shallow and sharp. Reef shoes help."
+    },
+    {
+      "id": "museum-of-samoa",
+      "match": ["museum of samoa"],
+      "blurb": "The national museum, housed in a former German colonial-era school building. Small, free or low cost, and a good grounding in faʻa Samoa, tattooing, navigation and the colonial period.",
+      "tip": null
+    },
+    {
+      "id": "cultural-village",
+      "match": ["cultural village"],
+      "blurb": "A living-culture demonstration on the waterfront — ʻava ceremony, siapo making, wood carving, coconut husking, umu (earth oven) cooking and dance, run by the Samoa Tourism Authority.",
+      "tip": "Runs on set weekday sessions rather than continuously — check times before going."
+    },
+    {
+      "id": "mulinuu",
+      "match": ["mulinu", "parliament", "maota fono"],
+      "blurb": "The peninsula west of the centre holds Samoa's Parliament, the tombs of former heads of state and paramount chiefs, and the old Apia Observatory. It is the country's ceremonial and political ground.",
+      "tip": "Quiet, open and good at sunset, but treat the tombs and grounds as the solemn places they are."
+    },
+    {
+      "id": "apia-park",
+      "match": ["apia park"],
+      "blurb": "The national stadium and sports complex, home ground for Manu Samoa rugby and a venue for the 2019 Pacific Games.",
+      "tip": null
+    },
+    {
+      "id": "bahai",
+      "match": ["baha", "bahá"],
+      "blurb": "The Bahá'í House of Worship at Tiapapata, in the hills south of Apia — one of only a small number of continental Bahá'í temples in the world, opened in 1984. Its nine-sided dome is visible from the cross-island road.",
+      "tip": "Open to visitors of any faith; the gardens are the draw as much as the building."
+    },
+    {
+      "id": "papaseea",
+      "match": ["papase", "sliding rock"],
+      "blurb": "Papaseʻea Sliding Rocks — a set of smooth waterfall chutes in the hills south of Apia that you slide down into freshwater pools.",
+      "tip": "Water level makes or breaks it: thin in the dry months, and the steps down are slippery. A village entry fee applies."
+    },
+    {
+      "id": "vailima-brewery",
+      "match": ["vailima brewery", "samoa breweries"],
+      "blurb": "Vailima, the national beer, is brewed in Apia and named after Stevenson's estate.",
+      "tip": null
+    },
+    {
+      "id": "tiafau",
+      "match": ["taumeasina", "vaiala"],
+      "blurb": "The eastern side of the harbour — Vaiala Beach and the causeway out to Taumeasina island give the closest easy swimming to the town centre.",
+      "tip": null
+    },
+    {
+      "id": "nus",
+      "match": ["national university of samoa", "le papaigalagala"],
+      "blurb": "Samoa's national university, at Le Papaigalagala on the eastern edge of Apia.",
+      "tip": null
+    },
+    {
+      "id": "hospital",
+      "match": ["tupua tamasese", "motoʻotua", "motootua", "national hospital"],
+      "blurb": "Tupua Tamasese Meaole Hospital at Motoʻotua is the national referral hospital and the main emergency facility in the country.",
+      "tip": "Serious cases are normally evacuated to New Zealand — travel insurance that covers aeromedical evacuation is strongly advised."
+    },
+    {
+      "id": "faleolo",
+      "match": ["faleolo"],
+      "blurb": "Samoa's international gateway (APW), about 35 km west of Apia on the north coast road.",
+      "tip": "Allow a full hour from central Apia, and more if you are travelling during the morning school and work run."
+    },
+    {
+      "id": "mulifanua",
+      "match": ["mulifanua"],
+      "blurb": "The wharf at the western tip of Upolu where the Savaiʻi ferry departs, next door to Faleolo airport.",
+      "tip": null
+    }
+  ]
+}
