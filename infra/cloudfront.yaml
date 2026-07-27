@@ -168,9 +168,15 @@ Resources:
             Override: true
           ContentSecurityPolicy:
             Override: true
-            # MapLibre builds its workers from blob: URLs, and decodes tiles into
-            # canvases, hence blob: and data: in worker-src/img-src. The connect-src
-            # list is exactly the tile, font and Overpass hosts the app can call.
+            # MapLibre builds its workers from blob: URLs and decodes tiles into
+            # canvases, hence blob: and data: in worker-src/img-src. connect-src
+            # lists exactly the tile, font and Overpass hosts the app may call —
+            # it must stay in step with OVERPASS_ENDPOINTS in src/config.js, and
+            # a unit test asserts that it does.
+            #
+            # Every line here must sit at the same indentation. A more-indented
+            # line in a YAML folded block keeps its newline, and CloudFront
+            # rejects a header value containing one.
             ContentSecurityPolicy: >-
               default-src 'self';
               base-uri 'self';
@@ -183,14 +189,9 @@ Resources:
               style-src 'self' 'unsafe-inline';
               img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.opentopomap.org;
               font-src 'self' data:;
-              connect-src 'self' blob:
-                https://tile.openstreetmap.org
-                https://*.tile.opentopomap.org
-                https://fonts.openmaptiles.org
-                https://overpass-api.de
-                https://overpass.kumi.systems
-                https://overpass.private.coffee
-                https://overpass.osm.ch;
+              connect-src 'self' blob: https://tile.openstreetmap.org https://*.tile.opentopomap.org
+              https://fonts.openmaptiles.org https://overpass-api.de https://overpass.kumi.systems
+              https://overpass.private.coffee https://overpass.osm.jp https://maps.mail.ru;
               upgrade-insecure-requests
 
   Distribution:
