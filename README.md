@@ -27,6 +27,22 @@ Where a fact could not be verified against a source, it is not asserted. The
 "Know before you go" panel carries a last-checked date and links out for
 anything time-sensitive.
 
+### Guarding against data that only looks right
+
+Each of these exists because it actually happened while this was being built:
+
+| Failure | What it looked like | Guard |
+| --- | --- | --- |
+| A mirror served an empty result | HTTP 200, valid JSON, zero features | Empty results are treated as a dead mirror — a query over northern Upolu cannot legitimately match nothing |
+| A mirror was 82 days behind the planet | A complete, plausible 2,300-feature answer | Responses report how far behind they are; anything over `MAX_OSM_AGE_DAYS` is skipped, and a stale snapshot fails validation outright |
+| Editorial blurbs on the wrong pin | The hospital note on a village node, the Mount Vaea note on "Lalovaea" | Whole-word matching, and each blurb declares the categories it may attach to — no match means no blurb, never a nearby guess |
+| One place drawn as two pins | OSM holds it as both a node and a way | Node+way pairs are collapsed; two objects of the *same* OSM type are left alone, because they are two real things |
+| Unparseable opening hours | Confident "Closed now" on a shop that was open | Anything outside the ordinary `opening_hours` forms reports *unknown* and shows the raw tag |
+
+`PIPELINE_VERSION` in `src/config.js` is recorded into `meta.json`. Change how
+extraction works, bump it, and the refresh workflow rebuilds the snapshot rather
+than leaving data in the old shape. `npm run check` fails if they disagree.
+
 ## Getting started
 
 ```bash
@@ -188,8 +204,10 @@ built — which the data panel always shows.
 ## Tests
 
 ```bash
-npx playwright test --project=unit      # pipeline, hours, search, editorial join
+npx playwright test                     # everything
+npx playwright test --project=unit      # pipeline, mirrors, hours, search, joins
 npx playwright test --project=browser   # the real UI in Chromium
+npm run check                           # validate the committed dataset
 ```
 
 Browser tests stub the dataset and every external host, so they never depend on

@@ -23,24 +23,41 @@ export function fold(s = '') {
     .trim();
 }
 
-/** Build a searchable index once per dataset load. */
-export function buildIndex(features) {
+/**
+ * Build a searchable index once per dataset load.
+ *
+ * @param {object[]} features
+ * @param {Map<string, string[]>} [extraAliases] feature id -> alternative names.
+ *   Used to feed in the local names from the editorial layer: OpenStreetMap
+ *   calls the main produce market "Fugalei Fresh Produce Market", but everyone
+ *   in Apia calls it Maketi Fou, and a search for the name people actually use
+ *   must find it.
+ */
+export function buildIndex(features, extraAliases) {
   return features.map((f) => {
     const p = f.properties;
-    const haystack = [p.name, p.name_sm, p.kind, p.operator, p.cuisine, p.addr, p.tags?.brand]
-      .filter(Boolean)
-      .join(' · ');
-    const folded = fold(p.name);
+    const t = p.tags || {};
+
+    // Alternative names carry the same weight as the primary name. OSM's own
+    // alt_name/old_name are included, so "Aggie Grey's" still finds a hotel
+    // that has since been renamed.
+    const aliases = [
+      p.name_sm, t.alt_name, t.old_name, t.official_name, t.brand,
+      ...(extraAliases?.get(p.id) || []),
+    ].filter(Boolean);
+
+    const haystack = [p.kind, p.operator, p.cuisine, p.addr].filter(Boolean).join(' · ');
+    const names = [fold(p.name), ...aliases.map(fold)].filter(Boolean);
+
     return {
       feature: f,
       id: p.id,
       name: p.name,
-      folded,
-      // Words of the name proper. Kept separate from the haystack: the haystack
-      // includes the category label, so treating them alike made searching
-      // "hospital" rank a clinic called "Emergency Department" above every
-      // building actually named Hospital.
-      nameWords: folded.split(/[^a-z0-9]+/).filter(Boolean),
+      // Each name is matched independently and the best score wins.
+      names: [...new Set(names)].map((n) => ({ folded: n, words: n.split(/[^a-z0-9]+/).filter(Boolean) })),
+      // Category label, operator, cuisine, address. Kept separate from names:
+      // treating them alike made searching "hospital" rank a clinic called
+      // "Emergency Department" above every building actually named Hospital.
       haystackFolded: fold(haystack),
       haystackWords: fold(haystack).split(/[^a-z0-9]+/).filter(Boolean),
       rank: p.rank ?? 5,
@@ -64,17 +81,21 @@ export function search(index, rawQuery, limit = 40) {
 
     for (const term of terms) {
       let best = 0;
-      if (entry.folded === term) best = 100;
-      // A term that is a whole word of the name beats one that merely starts a
-      // longer word: searching "stevenson" wants Robert Louis Stevenson's
-      // Museum, not Stevensons Law Office.
-      else if (entry.nameWords.includes(term)) best = 80;
-      else if (entry.folded.startsWith(term)) best = 70;
-      else if (entry.nameWords.some((w) => w.startsWith(term))) best = 55;
-      else if (entry.folded.includes(term)) best = 35;
+      for (const n of entry.names) {
+        let s = 0;
+        if (n.folded === term) s = 100;
+        // A term that is a whole word of the name beats one that merely starts
+        // a longer word: searching "stevenson" wants Robert Louis Stevenson's
+        // Museum, not Stevensons Law Office.
+        else if (n.words.includes(term)) s = 80;
+        else if (n.folded.startsWith(term)) s = 70;
+        else if (n.words.some((w) => w.startsWith(term))) s = 55;
+        else if (n.folded.includes(term)) s = 35;
+        if (s > best) best = s;
+      }
       // Category, operator, cuisine and address only - a much weaker signal.
-      else if (entry.haystackWords.includes(term)) best = 25;
-      else if (entry.haystackFolded.includes(term)) best = 18;
+      if (best === 0 && entry.haystackWords.includes(term)) best = 25;
+      else if (best === 0 && entry.haystackFolded.includes(term)) best = 18;
       if (best === 0) { matchedAll = false; break; }
       score += best;
     }

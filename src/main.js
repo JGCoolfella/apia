@@ -76,11 +76,11 @@ async function boot() {
   state.all = dataset.geojson.features;
   state.meta = dataset.meta || {};
   state.byId = new Map(state.all.map((f) => [f.properties.id, f]));
-  state.index = buildIndex(state.all);
   if (curated) {
     state.curated = curated;
     state.highlightById = joinHighlights(state.all, curated.highlights);
   }
+  state.index = buildIndex(state.all, aliasesFromHighlights(state.highlightById));
 
   setLoading('Drawing the map…');
   initMap(initial);
@@ -91,6 +91,16 @@ async function boot() {
   if (dataset.origin === 'live') {
     toast('Loaded live data straight from OpenStreetMap.');
   }
+}
+
+/**
+ * Local and historic names for the places the editorial layer covers, keyed by
+ * OSM id, so searching the name people actually use finds the right pin.
+ */
+function aliasesFromHighlights(highlightById) {
+  const out = new Map();
+  for (const [id, h] of highlightById) out.set(id, h.match || []);
+  return out;
 }
 
 function setLoading(text) {
@@ -795,8 +805,8 @@ function openData() {
       state.all = ds.geojson.features;
       state.meta = ds.meta;
       state.byId = new Map(state.all.map((f) => [f.properties.id, f]));
-      state.index = buildIndex(state.all);
       state.highlightById = joinHighlights(state.all, state.curated.highlights);
+      state.index = buildIndex(state.all, aliasesFromHighlights(state.highlightById));
       applyFilter();
       dlg.close();
       toast(`Refreshed — ${state.all.length.toLocaleString()} places from OpenStreetMap.`);

@@ -350,6 +350,25 @@ test.describe('search', () => {
   test('returns nothing for a term that is not in the data', () => {
     expect(search(index, 'zzzznotathing')).toHaveLength(0);
   });
+
+  test('finds a place by the name people actually use', () => {
+    // OSM calls Apia's main produce market "Fugalei Fresh Produce Market".
+    // Everyone in Apia calls it Maketi Fou, and so does every guidebook.
+    const market = fc.features.find((f) => f.properties.name === 'Maketi Fou');
+    const withAlias = buildIndex(fc.features, new Map([[market.properties.id, ['maketi fou', 'fugalei market']]]));
+    expect(search(withAlias, 'fugalei market')[0].properties.id).toBe(market.properties.id);
+  });
+
+  test('indexes OSM alt_name and old_name alongside the current name', () => {
+    const renamed = toGeoJSON({
+      elements: [{
+        type: 'node', id: 7001, lat: -13.833, lon: -171.765,
+        tags: { name: 'Sheraton Samoa Beach Resort', old_name: "Aggie Grey's Lagoon Resort", tourism: 'hotel' },
+      }],
+    });
+    const r = search(buildIndex(renamed.features), 'aggie grey');
+    expect(r[0]?.properties.name).toBe('Sheraton Samoa Beach Resort');
+  });
 });
 
 test.describe('editorial join', () => {
