@@ -136,6 +136,47 @@ test.describe('toGeoJSON', () => {
     expect(ids).toContain('w2002');
   });
 
+  test('collapses a place OSM holds as both a node and a way', () => {
+    // Museum of Samoa really is in OSM twice, ~15 m apart. Two pins for one
+    // place is the single most visible data-quality problem on a city map.
+    const doubled = {
+      elements: [
+        { type: 'node', id: 5001, lat: -13.8396419, lon: -171.7628209, tags: { name: 'Museum of Samoa', tourism: 'museum' } },
+        { type: 'way', id: 5002, center: { lat: -13.8397183, lon: -171.7626948 }, tags: { name: 'Museum of Samoa', tourism: 'museum', wikidata: 'Q106628284', opening_hours: 'Mo-Fr 09:00-16:00' } },
+      ],
+    };
+    const out = toGeoJSON(doubled);
+    expect(out.features).toHaveLength(1);
+    expect(out.deduped).toBe(1);
+    // The richer record survives, so no tags are lost in the merge.
+    expect(out.features[0].properties.wikidata).toBe('Q106628284');
+  });
+
+  test('never collapses unnamed features that share a fallback name', () => {
+    // Two ATMs outside neighbouring banks both come through as "ATM". Merging
+    // them would delete a real cash machine from the map.
+    const atms = {
+      elements: [
+        { type: 'node', id: 5005, lat: -13.83490, lon: -171.76710, tags: { amenity: 'atm', operator: 'ANZ' } },
+        { type: 'node', id: 5006, lat: -13.83495, lon: -171.76718, tags: { amenity: 'atm', operator: 'BSP' } },
+      ],
+    };
+    const out = toGeoJSON(atms);
+    expect(out.features).toHaveLength(2);
+    expect(out.features.every((f) => f.properties.name === 'ATM')).toBe(true);
+  });
+
+  test('keeps two genuinely different places that share a name', () => {
+    // Villages repeat names across Upolu; only near-coincident pairs collapse.
+    const apart = {
+      elements: [
+        { type: 'node', id: 5003, lat: -13.83, lon: -171.76, tags: { name: 'Vailima', place: 'village' } },
+        { type: 'node', id: 5004, lat: -13.90, lon: -171.90, tags: { name: 'Vailima', place: 'village' } },
+      ],
+    };
+    expect(toGeoJSON(apart).features).toHaveLength(2);
+  });
+
   test('never flips the hemisphere', () => {
     for (const f of fc.features) {
       const [lng, lat] = f.geometry.coordinates;
@@ -228,9 +269,25 @@ test.describe('search', () => {
     expect(r[0].properties.name).toBe('Apia Clock Tower');
   });
 
-  test('matches on category words too', () => {
+  test('ranks a name match above a category-label match', () => {
+    // "Emergency Department" is tagged amenity=hospital, so its category label
+    // contains "hospital". A building actually called Hospital must win.
     const r = search(index, 'hospital');
     expect(r[0].properties.name).toContain('Hospital');
+  });
+
+  test('prefers a whole word of the name over a longer word it merely starts', () => {
+    // Real case from the Apia dataset: "Stevensons Law Office" starts with the
+    // query, but "Robert Louis Stevenson's Museum" contains it as a whole word
+    // and is what anyone typing "stevenson" is looking for.
+    const withLawyer = toGeoJSON({
+      elements: [
+        ...sample.elements,
+        { type: 'node', id: 6001, lat: -13.834, lon: -171.765, tags: { name: 'Stevensons Law Office', office: 'lawyer' } },
+      ],
+    });
+    const r = search(buildIndex(withLawyer.features), 'stevenson');
+    expect(r[0].properties.name).toBe('Robert Louis Stevenson Museum');
   });
 
   test('returns nothing for a term that is not in the data', () => {
@@ -250,24 +307,37 @@ test.describe('editorial join', () => {
     expect(joined.get(cathedral.properties.id)?.id).toBe('mulivai-cathedral');
   });
 
-  test('prefers a real destination over a bus stop named after it', () => {
-    const fleaMarket = fc.features.find((f) => f.properties.name === 'Savalalo Flea Market');
-    const busStop = fc.features.find((f) => f.properties.name === 'Savalalo Terminal');
-    expect(joined.has(fleaMarket.properties.id)).toBe(true);
-    expect(joined.has(busStop.properties.id)).toBe(false);
+  test('prefers a real destination over a bus stop of the same name', () => {
+    // Both are transport, so the category constraint cannot separate them - the
+    // rank penalty has to. A ferry timetable blurb on a bus stop is useless.
+    const terminal = fc.features.find((f) => f.properties.kind === 'Ferry terminal');
+    const busStop = fc.features.find(
+      (f) => f.properties.kind === 'Bus stop' && f.properties.name === 'Mulifanua Ferry Terminal',
+    );
+    expect(joined.get(terminal.properties.id)?.id).toBe('mulifanua');
+    expect(joined.get(busStop.properties.id)).toBeUndefined();
   });
 
   test('matches whole words, not syllables inside other names', () => {
-    // The bug this prevents: "vaea" matching the suburb "Lalovaea", which put the
-    // Mount Vaea / Stevenson's tomb blurb on an unrelated place.
+    // The bug this prevents: "vaea" matching the suburb "Lalovaea", which put a
+    // Mount Vaea blurb on a completely unrelated place.
     expect(matchesWords('lalovaea', 'vaea')).toBe(false);
     expect(matchesWords('mount vaea', 'vaea')).toBe(true);
     expect(matchesWords('cathedral of the immaculate conception', 'immaculate conception')).toBe(true);
 
     const lalovaea = fc.features.find((f) => f.properties.name === 'Lalovaea');
-    const mtVaea = fc.features.find((f) => f.properties.name === 'Mount Vaea');
     expect(joined.get(lalovaea.properties.id)).toBeUndefined();
-    expect(joined.get(mtVaea.properties.id)?.id).toBe('mt-vaea');
+  });
+
+  test('folds English possessives so real OSM names still match', () => {
+    // OSM calls it "Robert Louis Stevenson's Museum". Stripping only the
+    // apostrophe leaves "stevensons", which whole-word matching then misses,
+    // and the blurb silently drifts onto a different Stevenson feature.
+    expect(fold("Robert Louis Stevenson's Museum")).toBe('robert louis stevenson museum');
+    expect(matchesWords(fold("Robert Louis Stevenson's Museum"), 'robert louis stevenson')).toBe(true);
+    // Samoan okina is always followed by a vowel, so it is left alone.
+    expect(fold("Papase'ea")).toBe('papaseea');
+    expect(fold("Fagali'i Airport")).toBe('fagalii airport');
   });
 
   test('will not put a blurb on a village that shares the place name', () => {

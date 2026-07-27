@@ -38,6 +38,17 @@ export const MAX_BOUNDS = [
 export const IANA_TZ = 'Pacific/Apia'; // UTC+13 year-round; Samoa abolished DST in 2021.
 
 /**
+ * Bump this whenever the extraction changes shape — the Overpass selectors, the
+ * classifier, the property schema, deduplication. The refresh workflow compares
+ * it against the value recorded in meta.json and rebuilds the snapshot when they
+ * differ, so a pipeline change cannot leave stale data behind.
+ *
+ *   1  initial extraction
+ *   2  collapse OSM node/way duplicates of the same place
+ */
+export const PIPELINE_VERSION = 2;
+
+/**
  * Overpass mirrors, tried in order. The build script and the in-browser "refresh
  * from OpenStreetMap" action both walk this list.
  */

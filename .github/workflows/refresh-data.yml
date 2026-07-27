@@ -28,11 +28,26 @@ jobs:
       - name: Decide whether to fetch
         id: decide
         run: |
-          if [ "${{ github.event_name }}" = "push" ] && [ -f public/data/apia.geojson ]; then
-            echo "A snapshot is already committed; nothing to bootstrap."
-            echo 'run=false' >> "$GITHUB_OUTPUT"
-          else
+          # Scheduled and manual runs always refresh. A push refreshes only when
+          # there is nothing to refresh from, or when the extraction pipeline
+          # itself has changed and the committed snapshot is the wrong shape.
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          if [ ! -f public/data/apia.geojson ] || [ ! -f public/data/meta.json ]; then
+            echo "No snapshot committed yet - bootstrapping."
+            echo 'run=true' >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          WANT=$(grep -oP 'PIPELINE_VERSION\s*=\s*\K\d+' src/config.js)
+          HAVE=$(grep -oP '"pipeline_version"\s*:\s*\K\d+' public/data/meta.json || echo 0)
+          if [ "$WANT" != "$HAVE" ]; then
+            echo "Snapshot was built by pipeline v$HAVE, code is v$WANT - rebuilding."
             echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            echo "Snapshot is current (pipeline v$HAVE); nothing to do."
+            echo 'run=false' >> "$GITHUB_OUTPUT"
           fi
 
       - uses: actions/setup-node@v4

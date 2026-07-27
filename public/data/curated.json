@@ -148,20 +148,6 @@
       "tip": "The trail up Mount Vāea to his tomb starts near the museum grounds — steep, humid, and worth it for the view over Apia."
     },
     {
-      "id": "mt-vaea",
-      "match": [
-        "mount vaea",
-        "mt vaea",
-        "vaea"
-      ],
-      "cat": [
-        "outdoors",
-        "sights"
-      ],
-      "blurb": "The forested hill behind Vailima. Stevenson's tomb sits on the summit, reached by a walking track of roughly 30–60 minutes depending on which route you take.",
-      "tip": "Go early. There is no shade on the ridge and the afternoon heat is punishing."
-    },
-    {
       "id": "mulivai-cathedral",
       "match": [
         "immaculate conception",
@@ -178,11 +164,11 @@
     {
       "id": "clock-tower",
       "match": [
-        "clock tower",
-        "apia clock tower",
-        "town clock"
+        "clocktower roundabout",
+        "clock tower"
       ],
       "cat": [
+        "outdoors",
         "sights"
       ],
       "blurb": "The Apia clock tower stands on the roundabout at the centre of the waterfront, built as a memorial to Samoans who served in the First World War. It is the landmark locals give directions from.",
@@ -213,19 +199,6 @@
       "tip": null
     },
     {
-      "id": "flea-market",
-      "match": [
-        "flea market",
-        "savalalo market",
-        "handicraft"
-      ],
-      "cat": [
-        "shops"
-      ],
-      "blurb": "The handicraft and souvenir market at Savalalo: siapo (bark cloth), carvings, shell work, lavalava and printed cloth.",
-      "tip": "The terminal beside it is being rebuilt through 2026 — see the notices panel."
-    },
-    {
       "id": "palolo-deep",
       "match": [
         "palolo deep"
@@ -250,9 +223,9 @@
     {
       "id": "cultural-village",
       "match": [
-        "cultural village",
-        "samoa cultural village",
-        "fale samoa"
+        "samoa tourism authority visitors village",
+        "visitors village",
+        "cultural village"
       ],
       "cat": [
         "sights"
@@ -291,8 +264,7 @@
     {
       "id": "bahai",
       "match": [
-        "baha",
-        "bahá"
+        "bahai"
       ],
       "cat": [
         "worship",
@@ -304,29 +276,15 @@
     {
       "id": "papaseea",
       "match": [
-        "papase",
-        "sliding rock"
+        "papaseea",
+        "sliding rocks"
       ],
       "cat": [
-        "outdoors",
-        "sights"
+        "sights",
+        "outdoors"
       ],
       "blurb": "Papaseʻea Sliding Rocks — a set of smooth waterfall chutes in the hills south of Apia that you slide down into freshwater pools.",
       "tip": "Water level makes or breaks it: thin in the dry months, and the steps down are slippery. A village entry fee applies."
-    },
-    {
-      "id": "vailima-brewery",
-      "match": [
-        "vailima brewery",
-        "samoa breweries"
-      ],
-      "cat": [
-        "services",
-        "shops",
-        "food"
-      ],
-      "blurb": "Vailima, the national beer, is brewed in Apia and named after Stevenson's estate.",
-      "tip": null
     },
     {
       "id": "tiafau",

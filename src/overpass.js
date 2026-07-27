@@ -139,9 +139,67 @@ export function toGeoJSON(overpassJson) {
     });
   }
 
-  features.sort((a, b) => (a.properties.rank - b.properties.rank) || a.properties.name.localeCompare(b.properties.name));
-  features.forEach((f, i) => { f.id = i + 1; });
-  return { type: 'FeatureCollection', features };
+  const deduped = dedupe(features);
+  deduped.sort((a, b) => (a.properties.rank - b.properties.rank) || a.properties.name.localeCompare(b.properties.name));
+  deduped.forEach((f, i) => { f.id = i + 1; });
+  return { type: 'FeatureCollection', deduped: features.length - deduped.length, features: deduped };
+}
+
+/**
+ * OpenStreetMap frequently holds one real-world place twice — a node for the POI
+ * and a way for the building or area, both carrying the same name and tags.
+ * Drawn straight onto a map that is two pins a few metres apart for one place.
+ *
+ * Collapses features that share a folded name and category and sit within
+ * DEDUPE_METRES of each other, keeping whichever carries more information.
+ */
+const DEDUPE_METRES = 120;
+
+function dedupe(features) {
+  const keepAsIs = [];
+  const groups = new Map();
+  for (const f of features) {
+    // Unnamed features share a generic fallback name ("ATM", "Beach", "Bus
+    // stop"). Two ATMs on the same street are not a duplicate of each other, so
+    // they are never collapsed - only genuinely named places are.
+    if (f.properties.unnamed) { keepAsIs.push(f); continue; }
+    // Keyed on kind as well as category: a bus stop named after the ferry
+    // terminal it serves sits metres away and shares a category, but it is a
+    // different thing and deserves its own pin. Only like-for-like collapses.
+    const key = `${f.properties.cat}::${f.properties.kind}::${foldName(f.properties.name)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(f);
+  }
+
+  const keep = [...keepAsIs];
+  for (const group of groups.values()) {
+    if (group.length === 1) { keep.push(group[0]); continue; }
+
+    const clusters = [];
+    for (const f of group) {
+      const near = clusters.find((c) => metres(c[0].geometry.coordinates, f.geometry.coordinates) < DEDUPE_METRES);
+      if (near) near.push(f); else clusters.push([f]);
+    }
+    for (const cluster of clusters) {
+      keep.push(cluster.reduce((best, f) => (richness(f) > richness(best) ? f : best)));
+    }
+  }
+  return keep;
+}
+
+const richness = (f) => Object.keys(f.properties.tags || {}).length;
+
+function foldName(s = '') {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, ' ').trim().toLowerCase();
+}
+
+/** Equirectangular approximation - accurate enough at these distances. */
+function metres(a, b) {
+  const R = 6371008.8;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const x = toRad(b[0] - a[0]) * Math.cos(toRad((a[1] + b[1]) / 2));
+  const y = toRad(b[1] - a[1]);
+  return Math.sqrt(x * x + y * y) * R;
 }
 
 /** 7 decimal places is ~1 cm - well past what OSM data warrants, but lossless here. */

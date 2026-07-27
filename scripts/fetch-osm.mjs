@@ -12,7 +12,7 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { BBOX, OVERPASS_ENDPOINTS } from '../src/config.js';
+import { BBOX, OVERPASS_ENDPOINTS, PIPELINE_VERSION } from '../src/config.js';
 import { buildQuery, toGeoJSON, runOverpass } from '../src/overpass.js';
 import { CATEGORIES } from '../src/classify.js';
 
@@ -53,12 +53,14 @@ async function main() {
 
   const meta = {
     generated: new Date().toISOString(),
+    pipeline_version: PIPELINE_VERSION,
     // Overpass reports the moment the data was last synced from the OSM planet.
     osm_data_timestamp: json.osm3s?.timestamp_osm_base ?? null,
     endpoint,
     bbox: BBOX,
     feature_count: geojson.features.length,
     raw_element_count: json.elements.length,
+    duplicates_collapsed: geojson.deduped ?? 0,
     counts,
     source: 'OpenStreetMap contributors',
     license: 'Open Database License (ODbL) 1.0',
@@ -67,10 +69,13 @@ async function main() {
   };
 
   await mkdir(dirname(OUT_GEOJSON), { recursive: true });
-  await writeFile(OUT_GEOJSON, JSON.stringify(geojson) + '\n');
+  // `deduped` is a build statistic, not part of the FeatureCollection.
+  const { deduped, ...clean } = geojson;
+  await writeFile(OUT_GEOJSON, JSON.stringify(clean) + '\n');
   await writeFile(OUT_META, JSON.stringify(meta, null, 2) + '\n');
 
   log(`\nWrote ${geojson.features.length} features -> public/data/apia.geojson`);
+  log(`Collapsed ${geojson.deduped ?? 0} duplicate node/way pairs.`);
   log(`OSM data timestamp: ${meta.osm_data_timestamp || 'not reported'}`);
   log('\nBy category:');
   for (const [cat, n] of Object.entries(counts).sort((a, b) => b[1] - a[1])) {

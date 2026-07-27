@@ -8,7 +8,7 @@
 // The user can force step 3 at any time from the data panel, which is what makes
 // the map current rather than frozen at whenever the snapshot was built.
 
-import { DATA_URL, META_URL, OVERPASS_ENDPOINTS, BBOX } from './config.js';
+import { DATA_URL, META_URL, OVERPASS_ENDPOINTS, BBOX, PIPELINE_VERSION } from './config.js';
 import { buildQuery, toGeoJSON, runOverpass } from './overpass.js';
 
 const CACHE_KEY = 'apia-map:osm-cache:v1';
@@ -87,6 +87,7 @@ export async function refreshFromOSM(onProgress) {
   const geojson = toGeoJSON(json);
   const meta = {
     generated: new Date().toISOString(),
+    pipeline_version: PIPELINE_VERSION,
     osm_data_timestamp: json.osm3s?.timestamp_osm_base ?? null,
     endpoint,
     bbox: BBOX,

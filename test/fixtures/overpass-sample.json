@@ -79,6 +79,14 @@
       "tags": { "name": "Tanoa Tusitala Hotel", "tourism": "hotel", "stars": "4" }
     },
     {
+      "type": "node", "id": 1021, "lat": -13.8309, "lon": -172.0410,
+      "tags": { "name": "Mulifanua Ferry Terminal", "amenity": "ferry_terminal" }
+    },
+    {
+      "type": "node", "id": 1022, "lat": -13.8312, "lon": -172.0405,
+      "tags": { "name": "Mulifanua Ferry Terminal", "highway": "bus_stop" }
+    },
+    {
       "type": "node", "id": 1017, "lat": -13.8390, "lon": -171.7740,
       "tags": { "name": "Motoʻotua", "place": "suburb" }
     },

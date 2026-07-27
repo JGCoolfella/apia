@@ -12,6 +12,12 @@ export function fold(s = '') {
   return String(s)
     .normalize('NFD')
     .replace(DIACRITICS, '')
+    // English possessives are dropped whole, so "Robert Louis Stevenson's
+    // Museum" folds to "...stevenson museum" and matches a search for
+    // "stevenson museum". Stripping only the apostrophe would leave
+    // "stevensons", which then fails whole-word matching. Samoan's okina is
+    // always followed by a vowel, so this never touches names like Papase'ea.
+    .replace(/[ʻʼ‘’']s(?![a-z])/gi, '')
     .replace(OKINA, '')
     .toLowerCase()
     .trim();
@@ -24,13 +30,19 @@ export function buildIndex(features) {
     const haystack = [p.name, p.name_sm, p.kind, p.operator, p.cuisine, p.addr, p.tags?.brand]
       .filter(Boolean)
       .join(' · ');
+    const folded = fold(p.name);
     return {
       feature: f,
       id: p.id,
       name: p.name,
-      folded: fold(p.name),
-      words: fold(haystack).split(/[^a-z0-9]+/).filter(Boolean),
+      folded,
+      // Words of the name proper. Kept separate from the haystack: the haystack
+      // includes the category label, so treating them alike made searching
+      // "hospital" rank a clinic called "Emergency Department" above every
+      // building actually named Hospital.
+      nameWords: folded.split(/[^a-z0-9]+/).filter(Boolean),
       haystackFolded: fold(haystack),
+      haystackWords: fold(haystack).split(/[^a-z0-9]+/).filter(Boolean),
       rank: p.rank ?? 5,
     };
   });
@@ -53,17 +65,23 @@ export function search(index, rawQuery, limit = 40) {
     for (const term of terms) {
       let best = 0;
       if (entry.folded === term) best = 100;
-      else if (entry.folded.startsWith(term)) best = 80;
-      else if (entry.words.some((w) => w === term)) best = 65;
-      else if (entry.words.some((w) => w.startsWith(term))) best = 50;
+      // A term that is a whole word of the name beats one that merely starts a
+      // longer word: searching "stevenson" wants Robert Louis Stevenson's
+      // Museum, not Stevensons Law Office.
+      else if (entry.nameWords.includes(term)) best = 80;
+      else if (entry.folded.startsWith(term)) best = 70;
+      else if (entry.nameWords.some((w) => w.startsWith(term))) best = 55;
       else if (entry.folded.includes(term)) best = 35;
+      // Category, operator, cuisine and address only - a much weaker signal.
+      else if (entry.haystackWords.includes(term)) best = 25;
       else if (entry.haystackFolded.includes(term)) best = 18;
       if (best === 0) { matchedAll = false; break; }
       score += best;
     }
     if (!matchedAll) continue;
 
-    score += Math.max(0, 8 - entry.rank);
+    // Prominence matters on a map: a museum outranks an office when both match.
+    score += Math.max(0, 8 - entry.rank) * 3;
     score -= Math.min(10, entry.name.length / 12); // prefer the shorter, more exact name
     out.push({ entry, score });
   }
