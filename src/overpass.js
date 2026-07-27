@@ -149,24 +149,76 @@ function round(n) {
   return Math.round(n * 1e7) / 1e7;
 }
 
-/** POST the query to each mirror in turn, returning the first success. */
-export async function runOverpass(query, endpoints, fetchImpl = fetch, onAttempt) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * POST the query to each mirror in turn, returning the first genuine success.
+ *
+ * "Genuine" is doing real work here. Overpass mirrors fail in ways that still
+ * look like HTTP 200: a `remark` field carrying a runtime error, or an empty
+ * `elements` array from an instance that is up but has no data loaded. A query
+ * over the whole of northern Upolu cannot legitimately match zero objects, so an
+ * empty result is treated as a failed mirror and the next one is tried. Getting
+ * this wrong writes a blank map that looks like a successful build.
+ *
+ * @param {(url: string, attempt: number) => void} [onAttempt]
+ * @param {(url: string, attempt: number, message: string) => void} [onFailure]
+ */
+export async function runOverpass(query, endpoints, fetchImpl = fetch, onAttempt, onFailure) {
   const errors = [];
+  const ATTEMPTS = 2;
+
+  // Overpass asks that clients identify themselves. Browsers forbid setting
+  // User-Agent, so only send it from Node.
+  const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+  if (typeof window === 'undefined') {
+    headers['User-Agent'] = 'apia-map/1.0 (+https://github.com/JGCoolfella/apia)';
+  }
+
   for (const url of endpoints) {
-    try {
-      onAttempt?.(url);
-      const res = await fetchImpl(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ data: query }).toString(),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-      const json = await res.json();
-      if (!json || !Array.isArray(json.elements)) throw new Error('unexpected response shape');
-      return { json, endpoint: url };
-    } catch (err) {
-      errors.push(`${url}: ${err.message}`);
+    for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+      try {
+        onAttempt?.(url, attempt);
+        const res = await fetchImpl(url, {
+          method: 'POST',
+          headers,
+          body: new URLSearchParams({ data: query }).toString(),
+        });
+
+        const text = await res.text();
+        if (!res.ok) {
+          // 429 and 504 mean "busy, come back" rather than "broken".
+          const busy = res.status === 429 || res.status === 504;
+          throw new Error(`HTTP ${res.status} ${res.statusText}${busy ? ' (server busy)' : ''} ${snippet(text)}`);
+        }
+
+        let json;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          throw new Error(`response was not JSON: ${snippet(text)}`);
+        }
+
+        if (json.remark) throw new Error(`Overpass remark: ${json.remark}`);
+        if (!Array.isArray(json.elements)) throw new Error('response had no elements array');
+        if (json.elements.length === 0) {
+          throw new Error('returned zero elements - the mirror is up but has no data for this area');
+        }
+
+        return { json, endpoint: url };
+      } catch (err) {
+        const message = err.message || String(err);
+        errors.push(`${url} (attempt ${attempt}/${ATTEMPTS}): ${message}`);
+        onFailure?.(url, attempt, message);
+        if (attempt < ATTEMPTS) await sleep(3000);
+      }
     }
   }
-  throw new Error(`All Overpass endpoints failed:\n  ${errors.join('\n  ')}`);
+
+  throw new Error(`Every Overpass endpoint failed:\n  ${errors.join('\n  ')}`);
+}
+
+function snippet(text = '') {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  return clean ? `- ${clean.slice(0, 160)}` : '';
 }

@@ -76,8 +76,12 @@ export async function loadDataset() {
  */
 export async function refreshFromOSM(onProgress) {
   const query = buildQuery(BBOX);
-  const { json, endpoint } = await runOverpass(query, OVERPASS_ENDPOINTS, fetch, (url) =>
-    onProgress?.(`Querying ${new URL(url).host}...`),
+  const { json, endpoint } = await runOverpass(
+    query,
+    OVERPASS_ENDPOINTS,
+    fetch,
+    (url, attempt) => onProgress?.(`Querying ${new URL(url).host}${attempt > 1 ? ` (retry ${attempt})` : ''}...`),
+    (url) => onProgress?.(`${new URL(url).host} did not answer, trying the next mirror...`),
   );
   onProgress?.('Processing results...');
   const geojson = toGeoJSON(json);

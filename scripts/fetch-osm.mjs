@@ -31,8 +31,12 @@ async function main() {
   log('Requesting... (a cold Overpass query over this area usually takes 20-90s)\n');
 
   const started = Date.now();
-  const { json, endpoint } = await runOverpass(query, OVERPASS_ENDPOINTS, fetch, (url) =>
-    log(`  -> ${url}`),
+  const { json, endpoint } = await runOverpass(
+    query,
+    OVERPASS_ENDPOINTS,
+    fetch,
+    (url, attempt) => log(`  -> ${url}${attempt > 1 ? ` (retry ${attempt})` : ''}`),
+    (url, attempt, message) => log(`     x  ${message}`),
   );
   const elapsed = ((Date.now() - started) / 1000).toFixed(1);
   log(`\nGot ${json.elements.length} raw elements from ${endpoint} in ${elapsed}s.`);

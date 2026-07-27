@@ -6,7 +6,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { classify } from '../src/classify.js';
-import { toGeoJSON, buildQuery } from '../src/overpass.js';
+import { toGeoJSON, buildQuery, runOverpass } from '../src/overpass.js';
 import { evaluateHours, distanceMeters, formatDistance, joinHighlights } from '../src/format.js';
 import { buildIndex, search, fold } from '../src/search.js';
 import { BBOX } from '../src/config.js';
@@ -30,6 +30,64 @@ test.describe('Overpass query', () => {
     const q = buildQuery(BBOX);
     expect(q).toContain('nwr[amenity]');
     expect(q).toContain('out center tags;');
+  });
+});
+
+test.describe('Overpass mirror failover', () => {
+  const ok = { elements: [{ type: 'node', id: 1, lat: -13.83, lon: -171.76, tags: { amenity: 'bank', name: 'A bank' } }] };
+  const reply = (body, status = 200) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: 'x',
+    text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+  });
+
+  // Two attempts per endpoint with a 3s backoff would make these tests crawl.
+  const fast = ['a', 'b', 'c'];
+
+  test('falls through to the next mirror on an HTTP error', async () => {
+    const seen = [];
+    const fetchImpl = async (url) => {
+      seen.push(url);
+      return url === 'c' ? reply(ok) : reply('gateway timeout', 504);
+    };
+    const res = await runOverpass('q', fast, fetchImpl);
+    expect(res.endpoint).toBe('c');
+    expect(seen.filter((u) => u === 'a')).toHaveLength(2); // retried before moving on
+  });
+
+  test('rejects a mirror that answers 200 with zero elements', async () => {
+    // This is the failure that shipped an empty map: an instance that is up and
+    // returns valid JSON, but has no data loaded for the area.
+    const fetchImpl = async (url) => (url === 'c' ? reply(ok) : reply({ elements: [] }));
+    const res = await runOverpass('q', fast, fetchImpl);
+    expect(res.endpoint).toBe('c');
+    expect(res.json.elements).toHaveLength(1);
+  });
+
+  test('rejects a mirror that reports a runtime error in a remark', async () => {
+    const fetchImpl = async (url) =>
+      (url === 'c' ? reply(ok) : reply({ remark: 'runtime error: query timed out', elements: [] }));
+    const res = await runOverpass('q', fast, fetchImpl);
+    expect(res.endpoint).toBe('c');
+  });
+
+  test('rejects an HTML error page served with a 200', async () => {
+    const fetchImpl = async (url) => (url === 'c' ? reply(ok) : reply('<html>502 Bad Gateway</html>'));
+    const res = await runOverpass('q', fast, fetchImpl);
+    expect(res.endpoint).toBe('c');
+  });
+
+  test('reports every endpoint and reason when all of them fail', async () => {
+    const fetchImpl = async () => reply({ elements: [] });
+    await expect(runOverpass('q', fast, fetchImpl)).rejects.toThrow(/Every Overpass endpoint failed/);
+    await expect(runOverpass('q', fast, fetchImpl)).rejects.toThrow(/zero elements/);
+  });
+
+  test('never writes an empty dataset even if a mirror slips through', () => {
+    // toGeoJSON is the last line of defence; fetch-osm.mjs refuses to write when
+    // it returns nothing.
+    expect(toGeoJSON({ elements: [] }).features).toHaveLength(0);
   });
 });
 
