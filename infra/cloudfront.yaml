@@ -33,12 +33,25 @@ Parameters:
     Description: >
       ACM certificate ARN for DomainName. MUST be issued in us-east-1 —
       CloudFront reads certificates from that region regardless of where this
-      stack is deployed. Leave blank if DomainName is blank.
+      stack is deployed. deploy.sh requests and validates one automatically.
+      Leave blank if DomainName is blank.
+
+  HostedZoneId:
+    Type: String
+    Default: ''
+    Description: >
+      Route 53 hosted zone for DomainName. When set, the stack creates the A and
+      AAAA alias records pointing at the distribution. Leave blank to manage DNS
+      yourself. deploy.sh discovers this from the domain.
 
 Conditions:
   HasCustomDomain: !And
     - !Not [!Equals [!Ref DomainName, '']]
     - !Not [!Equals [!Ref AcmCertificateArn, '']]
+  ManagesDns: !And
+    - !Not [!Equals [!Ref DomainName, '']]
+    - !Not [!Equals [!Ref AcmCertificateArn, '']]
+    - !Not [!Equals [!Ref HostedZoneId, '']]
 
 Resources:
 
@@ -252,6 +265,29 @@ Resources:
             ResponseCode: 200
             ResponsePagePath: /index.html
             ErrorCachingMinTTL: 10
+
+  # A and AAAA alias records pointing the domain at the distribution. Alias
+  # records are free to query and work at a zone apex, which a CNAME cannot.
+  # Z2FDTNDATAQYW2 is the fixed, documented hosted zone id for every CloudFront
+  # distribution — it is not this account's zone and must not be substituted.
+  DnsRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Condition: ManagesDns
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      RecordSets:
+        - Name: !Ref DomainName
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+            EvaluateTargetHealth: false
+        - Name: !Ref DomainName
+          Type: AAAA
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+            EvaluateTargetHealth: false
 
 Outputs:
   BucketName:

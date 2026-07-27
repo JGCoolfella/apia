@@ -161,16 +161,42 @@ stack is:
   `.pmtiles` so byte ranges work, short-lived for HTML and data
 - TLS-only bucket policy, versioning, and lifecycle cleanup
 
-Optional custom domain:
+### On your own domain
 
 ```bash
-DOMAIN=apia.example.com \
+DOMAIN=apia.greendealer.co.nz npm run deploy
+```
+
+That is all that is needed, provided the zone is already in Route 53 on the same
+account. The script:
+
+1. finds the hosted zone for the domain, walking up the labels until it hits one
+   the account actually owns;
+2. reuses an existing ACM certificate for that name, or requests one in
+   `us-east-1` — CloudFront reads certificates only from that region, whatever
+   region the stack lives in, and this is not configurable;
+3. writes the DNS validation `CNAME` into the zone and waits for issuance
+   (usually 2–5 minutes on the first run only);
+4. deploys the stack, which creates the `A` and `AAAA` alias records pointing at
+   the distribution.
+
+Every step is idempotent — an interrupted run picks up where it left off, and
+DNS writes are `UPSERT`s, so nothing conflicts with a record already there.
+
+Override the discovery if you need to:
+
+```bash
+DOMAIN=apia.greendealer.co.nz \
+HOSTED_ZONE_ID=Z0123456789ABCDEFGHIJ \
 CERT_ARN=arn:aws:acm:us-east-1:123456789012:certificate/... \
 npm run deploy
 ```
 
-The certificate **must** be issued in `us-east-1` — CloudFront reads
-certificates only from that region, whatever region the stack lives in.
+**A word of warning about the zone apex.** Setting `DOMAIN` to a bare domain
+rather than a subdomain points that domain's `A` and `AAAA` records at this
+distribution, replacing whatever it currently serves. Alias records at an apex
+are legitimate and work correctly — but if a site already lives there, this
+takes it down. Use a subdomain unless you mean it.
 
 Running cost for a site like this is dominated by the CloudFront free tier;
 beyond it, expect single-digit dollars a month at modest traffic. `PriceClass_All`

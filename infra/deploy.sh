@@ -16,7 +16,12 @@ STACK="${STACK:-$PROJECT}"
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-ap-southeast-2}}"   # Sydney: closest bulk region to Samoa
 DOMAIN="${DOMAIN:-}"
 CERT_ARN="${CERT_ARN:-}"
+HOSTED_ZONE_ID="${HOSTED_ZONE_ID:-}"
 PRICE_CLASS="${PRICE_CLASS:-PriceClass_All}"
+
+# CloudFront only reads certificates from us-east-1, whatever region the rest of
+# the stack lives in. This is not configurable.
+CERT_REGION=us-east-1
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
@@ -46,10 +51,97 @@ npm run build
 
 [ -d "$DIST" ] || die "build produced no dist/ directory"
 
+# --- Custom domain: hosted zone, certificate, validation ---------------------
+#
+# All of this is idempotent. An existing zone is reused, an existing issued
+# certificate for the domain is reused, and re-running after a partial failure
+# picks up where it left off.
+
+if [ -n "$DOMAIN" ]; then
+  step "Custom domain: $DOMAIN"
+
+  if [ -z "$HOSTED_ZONE_ID" ]; then
+    # Walk up the labels: apia.example.co.nz -> example.co.nz -> co.nz, and use
+    # the most specific hosted zone this account actually owns.
+    probe="$DOMAIN"
+    while [ -n "$probe" ] && [ -z "$HOSTED_ZONE_ID" ]; do
+      HOSTED_ZONE_ID="$(aws route53 list-hosted-zones-by-name --dns-name "$probe" \
+        --query "HostedZones[?Name=='${probe}.'].Id | [0]" --output text 2>/dev/null || true)"
+      [ "$HOSTED_ZONE_ID" = "None" ] && HOSTED_ZONE_ID=""
+      [ -n "$HOSTED_ZONE_ID" ] && break
+      case "$probe" in
+        *.*.*) probe="${probe#*.}" ;;
+        *) probe="" ;;
+      esac
+    done
+    HOSTED_ZONE_ID="${HOSTED_ZONE_ID##*/}"   # strip the /hostedzone/ prefix
+  fi
+
+  [ -n "$HOSTED_ZONE_ID" ] || die "no Route 53 hosted zone found for $DOMAIN in this account.
+  Create the zone first, or pass HOSTED_ZONE_ID=... to skip discovery, or leave
+  DOMAIN unset to deploy on the CloudFront domain."
+  echo "Hosted zone: $HOSTED_ZONE_ID"
+
+  if [ -z "$CERT_ARN" ]; then
+    CERT_ARN="$(aws acm list-certificates --region "$CERT_REGION" \
+      --certificate-statuses ISSUED PENDING_VALIDATION \
+      --query "CertificateSummaryList[?DomainName=='${DOMAIN}'].CertificateArn | [0]" \
+      --output text 2>/dev/null || true)"
+    [ "$CERT_ARN" = "None" ] && CERT_ARN=""
+  fi
+
+  if [ -z "$CERT_ARN" ]; then
+    echo "Requesting a certificate in $CERT_REGION..."
+    CERT_ARN="$(aws acm request-certificate --region "$CERT_REGION" \
+      --domain-name "$DOMAIN" --validation-method DNS \
+      --query CertificateArn --output text)"
+    # ACM populates the validation record asynchronously.
+    for _ in $(seq 1 30); do
+      READY="$(aws acm describe-certificate --region "$CERT_REGION" --certificate-arn "$CERT_ARN" \
+        --query 'Certificate.DomainValidationOptions[0].ResourceRecord.Name' --output text 2>/dev/null || true)"
+      [ -n "$READY" ] && [ "$READY" != "None" ] && break
+      sleep 2
+    done
+  fi
+  echo "Certificate: $CERT_ARN"
+
+  CERT_STATUS="$(aws acm describe-certificate --region "$CERT_REGION" --certificate-arn "$CERT_ARN" \
+    --query 'Certificate.Status' --output text)"
+
+  if [ "$CERT_STATUS" != "ISSUED" ]; then
+    echo "Writing the DNS validation record..."
+    RR_NAME="$(aws acm describe-certificate --region "$CERT_REGION" --certificate-arn "$CERT_ARN" \
+      --query 'Certificate.DomainValidationOptions[0].ResourceRecord.Name' --output text)"
+    RR_VALUE="$(aws acm describe-certificate --region "$CERT_REGION" --certificate-arn "$CERT_ARN" \
+      --query 'Certificate.DomainValidationOptions[0].ResourceRecord.Value' --output text)"
+    [ -n "$RR_NAME" ] && [ "$RR_NAME" != "None" ] || die "ACM has not published a validation record yet; re-run in a minute."
+
+    # UPSERT, so re-running never conflicts with a record already there.
+    aws route53 change-resource-record-sets --hosted-zone-id "$HOSTED_ZONE_ID" \
+      --change-batch "{
+        \"Comment\": \"ACM validation for ${DOMAIN}\",
+        \"Changes\": [{
+          \"Action\": \"UPSERT\",
+          \"ResourceRecordSet\": {
+            \"Name\": \"${RR_NAME}\",
+            \"Type\": \"CNAME\",
+            \"TTL\": 300,
+            \"ResourceRecords\": [{\"Value\": \"${RR_VALUE}\"}]
+          }
+        }]
+      }" >/dev/null
+
+    echo "Waiting for the certificate to validate (usually 2-5 minutes)..."
+    aws acm wait certificate-validated --region "$CERT_REGION" --certificate-arn "$CERT_ARN" \
+      || die "certificate did not validate. Check the CNAME above exists in zone $HOSTED_ZONE_ID."
+  fi
+  echo "Certificate issued."
+fi
+
 step "Deploying the stack ($STACK)"
 PARAMS=(ProjectName="$PROJECT" PriceClass="$PRICE_CLASS")
 if [ -n "$DOMAIN" ] && [ -n "$CERT_ARN" ]; then
-  PARAMS+=(DomainName="$DOMAIN" AcmCertificateArn="$CERT_ARN")
+  PARAMS+=(DomainName="$DOMAIN" AcmCertificateArn="$CERT_ARN" HostedZoneId="$HOSTED_ZONE_ID")
   echo "Custom domain: $DOMAIN"
 fi
 
