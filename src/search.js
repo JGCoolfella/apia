@@ -8,6 +8,31 @@
 const DIACRITICS = /[̀-ͯ]/g;
 const OKINA = /[ʻʼ‘’']/g;
 
+/**
+ * Travel-vocabulary synonyms, expanded at query time. A visitor types the word
+ * they think in, not the OSM tag: "gas" should find petrol stations, "cash"
+ * should find ATMs. Expansions score lower than a direct hit so a place
+ * literally named "Gas" would still win over a synonym match.
+ */
+export const SYNONYMS = {
+  gas: ['petrol', 'fuel'], gasoline: ['petrol', 'fuel'], servo: ['petrol', 'fuel'],
+  cash: ['atm', 'bank'], money: ['atm', 'bank'],
+  grocery: ['supermarket'], groceries: ['supermarket'],
+  food: ['restaurant', 'cafe'], eat: ['restaurant', 'cafe'], dinner: ['restaurant'],
+  breakfast: ['cafe'], coffee: ['cafe'],
+  beer: ['bar', 'pub'], drink: ['bar', 'pub'],
+  doctor: ['clinic', 'hospital', 'doctors'], medical: ['clinic', 'hospital', 'pharmacy'],
+  chemist: ['pharmacy'], drugstore: ['pharmacy'],
+  boat: ['ferry', 'wharf'], ship: ['ferry'],
+  plane: ['airport'], flight: ['airport'], flights: ['airport'],
+  bus: ['bus stop', 'bus terminal'],
+  sleep: ['hotel', 'guest house', 'resort'], accommodation: ['hotel', 'guest house', 'resort'],
+  swim: ['beach', 'swimming pool'], snorkel: ['reef', 'beach', 'marine'],
+  souvenir: ['market', 'handicraft', 'gift'], souvenirs: ['market', 'handicraft', 'gift'],
+  police: ['police station'], embassy: ['embassy', 'high commission'],
+  wifi: ['internet'], sim: ['mobile phone', 'telecommunication'],
+};
+
 export function fold(s = '') {
   return String(s)
     .normalize('NFD')
@@ -66,8 +91,46 @@ export function buildIndex(features, extraAliases) {
 }
 
 /**
+ * True when two words are within Damerau-Levenshtein distance 1 of each other
+ * (one substitution, insertion, deletion, or adjacent transposition). Cheap
+ * closed-form check - no DP matrix needed for distance <= 1.
+ */
+export function withinOneEdit(a, b) {
+  if (a === b) return true;
+  const la = a.length, lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+  if (la === lb) {
+    // One substitution, or one adjacent transposition.
+    let i = 0;
+    while (i < la && a[i] === b[i]) i++;
+    if (i === la) return true;
+    if (a.slice(i + 1) === b.slice(i + 1)) return true;                       // substitution
+    return a[i] === b[i + 1] && a[i + 1] === b[i] && a.slice(i + 2) === b.slice(i + 2); // transposition
+  }
+  // One insertion/deletion: align the longer against the shorter.
+  const [sh, lo] = la < lb ? [a, b] : [b, a];
+  let i = 0;
+  while (i < sh.length && sh[i] === lo[i]) i++;
+  return sh.slice(i) === lo.slice(i + 1);
+}
+
+/** Score one term against one folded name. */
+function scoreTermAgainstName(term, n) {
+  if (n.folded === term) return 100;
+  // A term that is a whole word of the name beats one that merely starts a
+  // longer word: searching "stevenson" wants Robert Louis Stevenson's Museum,
+  // not Stevensons Law Office.
+  if (n.words.includes(term)) return 80;
+  if (n.folded.startsWith(term)) return 70;
+  if (n.words.some((w) => w.startsWith(term))) return 55;
+  if (n.folded.includes(term)) return 35;
+  return 0;
+}
+
+/**
  * Rank matches: whole-name match beats name prefix beats word prefix beats a
- * loose substring anywhere in the record. Ties break on OSM prominence.
+ * loose substring anywhere in the record; synonyms and one-typo fuzzy matches
+ * trail exact matches. Ties break on OSM prominence.
  */
 export function search(index, rawQuery, limit = 40) {
   const q = fold(rawQuery);
@@ -75,24 +138,53 @@ export function search(index, rawQuery, limit = 40) {
   const terms = q.split(/\s+/).filter(Boolean);
   const out = [];
 
+  // Pre-expand synonyms once per query, not once per entry. The key lookup
+  // itself tolerates one typo ("flighht" still means flight) - keys are long
+  // English words, so a one-edit collision is vanishingly unlikely.
+  const expansions = terms.map((t) => {
+    let syns = SYNONYMS[t];
+    if (!syns && t.length >= 5) {
+      const near = Object.keys(SYNONYMS).find((k) => k.length >= 5 && withinOneEdit(t, k));
+      if (near) syns = SYNONYMS[near];
+    }
+    return (syns || []).flatMap((x) => fold(x).split(/\s+/));
+  });
+
   for (const entry of index) {
     let score = 0;
     let matchedAll = true;
 
-    for (const term of terms) {
+    for (let ti = 0; ti < terms.length; ti++) {
+      const term = terms[ti];
       let best = 0;
+
       for (const n of entry.names) {
-        let s = 0;
-        if (n.folded === term) s = 100;
-        // A term that is a whole word of the name beats one that merely starts
-        // a longer word: searching "stevenson" wants Robert Louis Stevenson's
-        // Museum, not Stevensons Law Office.
-        else if (n.words.includes(term)) s = 80;
-        else if (n.folded.startsWith(term)) s = 70;
-        else if (n.words.some((w) => w.startsWith(term))) s = 55;
-        else if (n.folded.includes(term)) s = 35;
-        if (s > best) best = s;
+        const sc = scoreTermAgainstName(term, n);
+        if (sc > best) best = sc;
       }
+
+      // Synonyms: the word the visitor typed, mapped to what the data calls
+      // it. Scored at 70% so a literal match always outranks an interpretation.
+      if (best < 50) {
+        for (const syn of expansions[ti]) {
+          for (const n of entry.names) {
+            const sc = scoreTermAgainstName(syn, n) * 0.7;
+            if (sc > best) best = sc;
+          }
+          if (best < 20 && entry.haystackWords.includes(syn)) best = 18;
+        }
+      }
+
+      // Typo tolerance: one edit, only for words long enough that a single
+      // slip is overwhelmingly a typo rather than a different word. Short
+      // Samoan words are one edit from each other constantly - never fuzzy
+      // them.
+      if (best === 0 && term.length >= 5) {
+        for (const n of entry.names) {
+          if (n.words.some((w) => w.length >= 5 && withinOneEdit(term, w))) { best = 40; break; }
+        }
+      }
+
       // Category, operator, cuisine and address only - a much weaker signal.
       if (best === 0 && entry.haystackWords.includes(term)) best = 25;
       else if (best === 0 && entry.haystackFolded.includes(term)) best = 18;
@@ -109,4 +201,42 @@ export function search(index, rawQuery, limit = 40) {
 
   out.sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name));
   return out.slice(0, limit).map((r) => r.entry.feature);
+}
+
+/**
+ * Split a display name into segments, flagging the parts the query matched, so
+ * the UI can highlight them. Works on the ORIGINAL string: folding changes
+ * character offsets (the okina and possessives are dropped), so a per-character
+ * map from folded position back to original position is kept while folding.
+ * Returns [{ text, hit }] covering the whole name, in order.
+ */
+export function matchSegments(name, rawQuery) {
+  const terms = fold(rawQuery).split(/\s+/).filter(Boolean);
+  if (!terms.length) return [{ text: name, hit: false }];
+
+  const map = [];
+  let folded = '';
+  for (let i = 0; i < name.length; i++) {
+    const f = fold(name[i]);
+    for (const ch of f) { folded += ch; map.push(i); }
+  }
+
+  const hits = new Array(name.length).fill(false);
+  for (const term of terms) {
+    let from = 0;
+    for (;;) {
+      const at = folded.indexOf(term, from);
+      if (at === -1) break;
+      for (let i = map[at]; i <= map[at + term.length - 1]; i++) hits[i] = true;
+      from = at + 1;
+    }
+  }
+
+  const segments = [];
+  for (let i = 0; i < name.length; i++) {
+    const last = segments[segments.length - 1];
+    if (last && last.hit === hits[i]) last.text += name[i];
+    else segments.push({ text: name[i], hit: hits[i] });
+  }
+  return segments;
 }

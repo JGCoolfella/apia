@@ -262,6 +262,50 @@ test('a guided walk starts, steps through stops, and is honest about routing', a
   await expect(page.locator('#walkPanel')).toBeHidden();
 });
 
+test('search highlights the matched part of a result and forgives typos', async ({ page }) => {
+  await open(page);
+  await page.locator('#searchInput').fill('stevensen');   // one-letter typo
+  const first = page.locator('#searchResults [role="option"]').first();
+  await expect(first).toContainText('Robert Louis Stevenson Museum');
+
+  await page.locator('#searchInput').fill('clock');
+  await expect(page.locator('#searchResults [role="option"] mark').first()).toHaveText(/clock/i);
+});
+
+test('recent searches reappear on the next empty focus', async ({ page }) => {
+  await open(page);
+  const input = page.locator('#searchInput');
+  await input.fill('cathedral');
+  await page.locator('#searchResults [role="option"] button').first().click();
+
+  // The picked query stays in the box; clearing it is what returns you to the
+  // quicks-and-recents view.
+  await input.click();
+  await page.locator('#searchClear').click();
+  const recent = page.locator('.search-quicks.recents .chip').first();
+  await expect(recent).toContainText('cathedral');
+  await recent.click();
+  await expect(input).toHaveValue('cathedral');
+  await expect(page.locator('#searchResults [role="option"]').first()).toContainText('Immaculate');
+});
+
+test('right-click answers "what is near this point"', async ({ page }) => {
+  await open(page);
+  const box = await page.locator('#map').boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
+
+  const detail = page.locator('#detail');
+  await expect(detail).toBeVisible();
+  await expect(detail.locator('h2')).toHaveText('Near this point');
+  const rows = detail.locator('.result');
+  expect(await rows.count()).toBeGreaterThan(2);
+  // Every row shows a distance from the clicked point.
+  await expect(rows.first().locator('.res-dist')).toContainText(/m|km/);
+
+  await rows.first().click();
+  await expect(detail.locator('h2')).not.toHaveText('Near this point');
+});
+
 test('keyboard help opens with ?', async ({ page }) => {
   await open(page);
   await page.keyboard.press('?');

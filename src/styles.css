@@ -5,24 +5,25 @@
 --------------------------------------------------------------------------- */
 
 :root {
-  --bg: #ffffff;
-  --bg-sunk: #f4f6f8;
+  /* Lagoon-and-sand palette: deep Pacific blue anchored by warm neutrals. */
+  --bg: #fbfaf8;
+  --bg-sunk: #f2f0ec;
   --bg-raised: #ffffff;
-  --fg: #101828;
-  --fg-muted: #5a6472;
-  --fg-faint: #8b95a3;
-  --line: #e3e8ee;
-  --line-strong: #cbd3dd;
-  --accent: #0b6fb8;
+  --fg: #14212e;
+  --fg-muted: #56636f;
+  --fg-faint: #8a949e;
+  --line: #e6e2db;
+  --line-strong: #cfc9bf;
+  --accent: #0a6e8a;
   --accent-fg: #ffffff;
-  --accent-soft: #e7f1fa;
+  --accent-soft: #e3f1f5;
   --danger: #d1233b;
   --ok: #12805c;
-  --shadow-sm: 0 1px 2px rgb(16 24 40 / 0.06), 0 1px 3px rgb(16 24 40 / 0.10);
-  --shadow-md: 0 4px 12px rgb(16 24 40 / 0.10), 0 2px 4px rgb(16 24 40 / 0.06);
-  --shadow-lg: 0 16px 40px rgb(16 24 40 / 0.18);
-  --radius: 12px;
-  --radius-sm: 8px;
+  --shadow-sm: 0 1px 2px rgb(20 33 46 / 0.06), 0 1px 3px rgb(20 33 46 / 0.10);
+  --shadow-md: 0 4px 14px rgb(20 33 46 / 0.10), 0 2px 4px rgb(20 33 46 / 0.06);
+  --shadow-lg: 0 18px 44px rgb(20 33 46 / 0.18);
+  --radius: 14px;
+  --radius-sm: 9px;
   --topbar-h: 60px;
   --sidebar-w: 372px;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -30,17 +31,17 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f172a;
-    --bg-sunk: #0b1220;
-    --bg-raised: #182234;
-    --fg: #e9eef5;
-    --fg-muted: #a3b0c2;
-    --fg-faint: #7b8798;
-    --line: #263349;
-    --line-strong: #35455f;
-    --accent: #4da3e8;
-    --accent-fg: #06213a;
-    --accent-soft: #17304a;
+    --bg: #0e1720;
+    --bg-sunk: #0a1118;
+    --bg-raised: #16222d;
+    --fg: #e9eef3;
+    --fg-muted: #a2b0bc;
+    --fg-faint: #798795;
+    --line: #24333f;
+    --line-strong: #334655;
+    --accent: #47b3d4;
+    --accent-fg: #06222c;
+    --accent-soft: #14323d;
     --danger: #ff6b7f;
     --ok: #3fc79a;
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.5);
@@ -215,6 +216,38 @@ a:hover { text-decoration-thickness: 2px; }
 .search-results button:hover { background: var(--accent-soft); }
 .res-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 
+/* Category icon bubble: tinted square with the category emoji. Far more
+   scannable down a long list than a bare colour dot. */
+.cat-bubble {
+  flex: none;
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  font-size: 15px; line-height: 1;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--cat, var(--accent)) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cat, var(--accent)) 28%, transparent);
+}
+.cat-bubble.sm { width: 22px; height: 22px; font-size: 12px; border-radius: 7px; }
+
+mark {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+.chip .chip-icon { font-size: 13px; line-height: 1; margin-right: 1px; }
+.chip[aria-pressed="false"] .chip-icon { filter: grayscale(1); opacity: .6; }
+.chip[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--cat, var(--accent)) 10%, var(--bg-raised));
+  border-color: color-mix(in srgb, var(--cat, var(--accent)) 45%, var(--line-strong));
+}
+
+.search-quicks.recents { border-bottom: 0; padding-bottom: 2px; }
+.nearby-list { display: grid; gap: 2px; padding-top: 8px; }
+.nearby-list .res-dist { text-align: right; line-height: 1.25; }
+.nearby-list .res-dist small { color: var(--fg-faint); font-size: 10.5px; }
+
 /* These are spans, so they need to be blocks before ellipsis truncation and
    min-width:0 shrinking will do anything. */
 .res-body { display: flex; flex-direction: column; min-width: 0; flex: 1; }
@@ -342,7 +375,15 @@ a:hover { text-decoration-thickness: 2px; }
 @keyframes pop { from { opacity: 0; transform: translateY(-6px); } }
 @media (prefers-reduced-motion: reduce) { .detail { animation: none; } }
 
-.detail-head { padding: 14px 16px 10px; border-bottom: 1px solid var(--line); position: relative; }
+.detail-head {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--line);
+  position: relative;
+  /* Category-coloured accent along the top of the card. */
+  border-top: 3px solid var(--cat, var(--accent));
+  border-top-left-radius: inherit;
+  border-top-right-radius: inherit;
+}
 .detail-head h2 { font-size: 18px; padding-right: 34px; line-height: 1.25; }
 .detail-kind { font-size: 12.5px; color: var(--fg-muted); margin-top: 3px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .detail-close { position: absolute; top: 10px; right: 10px; }

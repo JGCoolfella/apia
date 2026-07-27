@@ -23,7 +23,7 @@ import { APIA_CENTER, DEFAULT_CENTER, DEFAULT_ZOOM, MAX_BOUNDS, IANA_TZ, STALE_S
 import { CATEGORIES, CATEGORY_ORDER } from './classify.js';
 import { BASEMAPS, DEFAULT_BASEMAP } from './basemaps.js';
 import { loadDataset, refreshFromOSM, clearCache } from './data.js';
-import { buildIndex, search } from './search.js';
+import { buildIndex, search, matchSegments } from './search.js';
 import {
   escapeHTML, distanceMeters, formatDistance, walkingTime, evaluateHours,
   telHref, osmLink, osmEditLink, directionsLinks, joinHighlights, currentApiaTime,
@@ -244,6 +244,70 @@ function initMap(initial) {
     const idx = e.features?.[0]?.properties?.step;
     if (idx !== undefined && state.walk) goToWalkStep(Number(idx));
   });
+
+  // "What's near here?" - right-click on desktop, long-press on touch. Answers
+  // the question a paper map cannot: standing at an arbitrary point, what is
+  // around me?
+  map.on('contextmenu', (e) => {
+    e.preventDefault?.();
+    showNearby([e.lngLat.lng, e.lngLat.lat]);
+  });
+  let pressTimer = null;
+  map.on('touchstart', (e) => {
+    if (e.points?.length !== 1) return;
+    const at = e.lngLat;
+    pressTimer = setTimeout(() => showNearby([at.lng, at.lat]), 600);
+  });
+  for (const ev of ['touchend', 'touchcancel', 'touchmove', 'movestart']) {
+    map.on(ev, () => { clearTimeout(pressTimer); });
+  }
+}
+
+function hoverFeature(id) {
+  const src = state.map?.getSource('hovered');
+  if (!src) return;
+  const f = id ? state.byId.get(id) : null;
+  src.setData(f ? { type: 'FeatureCollection', features: [f] } : EMPTY_FC);
+}
+
+/** List the closest places to an arbitrary point, in the detail panel. */
+function showNearby(coords) {
+  const nearest = visibleFeatures()
+    .map((f) => ({ f, d: distanceMeters(coords, f.geometry.coordinates) }))
+    .sort((a, b) => a.d - b.d)
+    .slice(0, 7);
+  if (!nearest.length) return;
+
+  state.selectedId = null;
+  highlightOnMap(null);
+
+  const rows = nearest.map(({ f, d }) => {
+    const p = f.properties;
+    const c = CATEGORIES[p.cat];
+    return `<button class="result" data-id="${escapeHTML(p.id)}">
+      <span class="cat-bubble" style="--cat:${c.color}">${c.icon}</span>
+      <span class="res-body">
+        <span class="res-name">${escapeHTML(p.name)}</span>
+        <span class="tagline">${escapeHTML(p.kind)}</span>
+      </span>
+      <span class="res-dist">${formatDistance(d)}<br><small>${escapeHTML(walkingTime(d).replace('about ', '~'))}</small></span>
+    </button>`;
+  }).join('');
+
+  $('#detail').innerHTML = `
+    <div class="detail-head">
+      <button class="icon-btn ghost detail-close" data-act="close" title="Close"><span aria-hidden="true">✕</span><span class="sr-only">Close</span></button>
+      <h2>Near this point</h2>
+      <div class="detail-kind"><span>${coords[1].toFixed(5)}, ${coords[0].toFixed(5)} · closest of what's currently shown</span></div>
+    </div>
+    <div class="detail-body nearby-list">${rows}</div>`;
+  $('#detail').hidden = false;
+
+  $('#detail').querySelectorAll('.result[data-id]').forEach((btn) => {
+    btn.addEventListener('click', () => selectFeature(btn.dataset.id));
+    btn.addEventListener('mouseenter', () => hoverFeature(btn.dataset.id));
+    btn.addEventListener('mouseleave', () => hoverFeature(null));
+  });
 }
 
 /**
@@ -316,6 +380,22 @@ function addLayers(map) {
   map.addSource('selected', {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: [] },
+  });
+
+  // Ring shown under whichever list row the pointer is on - the glue that ties
+  // the sidebar to the map.
+  map.addSource('hovered', { type: 'geojson', data: EMPTY_FC });
+  map.addLayer({
+    id: 'hovered-ring',
+    type: 'circle',
+    source: 'hovered',
+    paint: {
+      'circle-radius': 16,
+      'circle-color': 'transparent',
+      'circle-stroke-color': '#0b6fb8',
+      'circle-stroke-width': 2.5,
+      'circle-stroke-opacity': 0.85,
+    },
   });
 
   map.addLayer({
@@ -474,8 +554,8 @@ function buildChips() {
   const wrap = $('#chips');
   wrap.innerHTML = CATEGORY_ORDER.map((cat) => {
     const c = CATEGORIES[cat];
-    return `<button class="chip" role="switch" data-cat="${cat}" aria-pressed="${state.active.has(cat)}" title="${escapeHTML(c.blurb)}">
-      <span class="swatch" style="background:${c.color}"></span>${escapeHTML(c.label)}
+    return `<button class="chip" role="switch" data-cat="${cat}" aria-pressed="${state.active.has(cat)}" title="${escapeHTML(c.blurb)}" style="--cat:${c.color}">
+      <span class="chip-icon">${c.icon}</span>${escapeHTML(c.label)}
       <span class="n" data-count="${cat}"></span>
     </button>`;
   }).join('');
@@ -540,7 +620,7 @@ function renderList() {
     const pick = state.highlightById.has(p.id) ? '<span class="badge pick">Pick</span>' : '';
     return `<li>
       <button class="result" data-id="${escapeHTML(p.id)}" aria-current="${state.selectedId === p.id}">
-        <span class="res-dot" style="background:${cat.color}"></span>
+        <span class="cat-bubble" style="--cat:${cat.color}">${cat.icon}</span>
         <span class="res-body">
           <span class="res-name">${escapeHTML(p.name)}${badge}${pick}</span>
           <span class="tagline">${escapeHTML(p.kind)}${p.addr ? ' · ' + escapeHTML(p.addr) : ''}</span>
@@ -773,12 +853,12 @@ function showDetail(id) {
     .join('');
 
   $('#detail').innerHTML = `
-    <div class="detail-head">
+    <div class="detail-head" style="--cat:${cat.color}">
       <button class="icon-btn ghost detail-close" data-act="close" title="Close"><span aria-hidden="true">✕</span><span class="sr-only">Close</span></button>
       <h2>${escapeHTML(p.name)}</h2>
       ${p.name_sm ? `<div class="detail-sm">${escapeHTML(p.name_sm)}</div>` : ''}
       <div class="detail-kind">
-        <span class="res-dot" style="background:${cat.color}"></span>
+        <span class="cat-bubble sm" style="--cat:${cat.color}">${cat.icon}</span>
         <span>${escapeHTML(p.kind)} · ${escapeHTML(cat.label)}</span>
         ${hours.state === 'open' ? '<span class="badge open">Open now</span>' : ''}
         ${hours.state === 'closed' ? '<span class="badge closed">Closed now</span>' : ''}
@@ -819,6 +899,16 @@ function wireUI() {
   $('#results').addEventListener('click', (e) => {
     const btn = e.target.closest('.result');
     if (btn) selectFeature(btn.dataset.id);
+  });
+
+  // Hovering a row rings its pin on the map, so the list and the map read as
+  // one surface instead of two.
+  $('#results').addEventListener('mouseover', (e) => {
+    const btn = e.target.closest('.result');
+    if (btn?.dataset.id) hoverFeature(btn.dataset.id);
+  });
+  $('#results').addEventListener('mouseout', (e) => {
+    if (!e.relatedTarget?.closest?.('.result')) hoverFeature(null);
   });
 
   $('#detail').addEventListener('click', (e) => {
@@ -932,15 +1022,34 @@ function wireSearch() {
     ['☕', 'cafe'], ['🏧', 'bank'], ['🏥', 'hospital'], ['🛒', 'supermarket'],
   ];
 
+  const RECENTS_KEY = 'apia-map:recent-searches';
+  const getRecents = () => {
+    try { return JSON.parse(localStorage.getItem(RECENTS_KEY)) || []; } catch { return []; }
+  };
+  const pushRecent = (q) => {
+    if (!q || q.length < 2) return;
+    try {
+      const r = [q, ...getRecents().filter((x) => x !== q)].slice(0, 6);
+      localStorage.setItem(RECENTS_KEY, JSON.stringify(r));
+    } catch { /* storage full or blocked - recents are a nicety */ }
+  };
+
   const showQuicks = () => {
-    list.innerHTML = `<li class="search-quicks" role="presentation">
+    const recents = getRecents();
+    const recentRow = recents.length
+      ? `<li class="search-quicks recents" role="presentation">
+          ${recents.map((q) => `<button class="chip" data-q="${escapeHTML(q)}">🕐 ${escapeHTML(q)}</button>`).join('')}
+        </li>`
+      : '';
+    list.innerHTML = `${recentRow}<li class="search-quicks" role="presentation">
       ${QUICKS.map(([icon, q]) =>
         `<button class="chip" data-q="${escapeHTML(q)}">${icon} ${escapeHTML(q)}</button>`).join('')}
       </li>
-      <li class="search-empty" role="presentation">Type to search ${state.all.length.toLocaleString()} places — English or Samoan spelling both work.</li>`;
+      <li class="search-empty" role="presentation">Type to search ${state.all.length.toLocaleString()} places — English or Samoan spelling both work, and one-letter typos are forgiven.</li>`;
     list.hidden = false;
     combo.setAttribute('aria-expanded', 'true');
   };
+  wireSearch.pushRecent = pushRecent;
 
   const run = () => {
     const q = input.value.trim();
@@ -959,11 +1068,14 @@ function wireSearch() {
         const p = f.properties;
         const c = CATEGORIES[p.cat];
         const d = formatDistance(distanceMeters(origin, f.geometry.coordinates));
+        const name = matchSegments(p.name, q)
+          .map((s) => (s.hit ? `<mark>${escapeHTML(s.text)}</mark>` : escapeHTML(s.text)))
+          .join('');
         return `<li role="option" id="sr-${i}" aria-selected="false">
           <button data-id="${escapeHTML(p.id)}" data-i="${i}">
-            <span class="res-dot" style="background:${c.color}"></span>
+            <span class="cat-bubble" style="--cat:${c.color}">${c.icon}</span>
             <span class="res-body">
-              <span class="res-name">${escapeHTML(p.name)}</span>
+              <span class="res-name">${name}</span>
               <span class="res-meta">${escapeHTML(p.kind)}${p.addr ? ' · ' + escapeHTML(p.addr) : ''}</span>
             </span>
             <span class="res-dist">${d}</span>
@@ -1002,7 +1114,7 @@ function wireSearch() {
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const pick = state.searchMatches[state.searchHighlight >= 0 ? state.searchHighlight : 0];
-      if (pick) { selectFeature(pick.properties.id); input.blur(); close(); }
+      if (pick) { wireSearch.pushRecent(input.value.trim()); selectFeature(pick.properties.id); input.blur(); close(); }
     } else if (e.key === 'Escape') {
       close();
       input.blur();
@@ -1012,6 +1124,7 @@ function wireSearch() {
   list.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-id]');
     if (!btn) return;
+    wireSearch.pushRecent(input.value.trim());
     selectFeature(btn.dataset.id);
     close();
     input.blur();

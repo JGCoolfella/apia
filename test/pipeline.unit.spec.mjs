@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { classify } from '../src/classify.js';
 import { toGeoJSON, buildQuery, runOverpass } from '../src/overpass.js';
 import { evaluateHours, distanceMeters, formatDistance, joinHighlights, matchesWords, resolveWalk } from '../src/format.js';
-import { buildIndex, search, fold } from '../src/search.js';
+import { buildIndex, search, fold, withinOneEdit, matchSegments } from '../src/search.js';
 import { BBOX } from '../src/config.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -349,6 +349,66 @@ test.describe('search', () => {
 
   test('returns nothing for a term that is not in the data', () => {
     expect(search(index, 'zzzznotathing')).toHaveLength(0);
+  });
+
+  test('forgives a single typo in a long word', () => {
+    // "stevensen" is one substitution from "stevenson".
+    const r = search(index, 'stevensen');
+    expect(r[0]?.properties.name).toBe('Robert Louis Stevenson Museum');
+  });
+
+  test('never fuzzy-matches short words', () => {
+    // Short Samoan words are one edit apart constantly; a typo engine that
+    // "corrects" them would return confident nonsense. 4 letters and below
+    // must match literally or not at all.
+    expect(withinOneEdit('fale', 'tale')).toBe(true);   // the raw check says yes...
+    expect(search(index, 'tale').some((f) => /fale/i.test(f.properties.name))).toBe(false); // ...search refuses
+  });
+
+  test('understands travel vocabulary through synonyms', () => {
+    // The fixture has a petrol station? No - it has a bank and ATM; "cash"
+    // should surface them without either containing the word.
+    const r = search(index, 'cash');
+    expect(r.length).toBeGreaterThan(0);
+    expect(r.some((f) => f.properties.cat === 'money')).toBe(true);
+  });
+
+  test('ranks a literal name match above a synonym interpretation', () => {
+    const withGas = toGeoJSON({
+      elements: [
+        ...sample.elements,
+        { type: 'node', id: 6002, lat: -13.835, lon: -171.766, tags: { name: 'Gas Haus Grill', amenity: 'restaurant' } },
+        { type: 'node', id: 6003, lat: -13.836, lon: -171.767, tags: { name: 'Origin Energy Petrol', amenity: 'fuel' } },
+      ],
+    });
+    const r = search(buildIndex(withGas.features), 'gas');
+    expect(r[0].properties.name).toBe('Gas Haus Grill');            // literal beats synonym
+    expect(r.map((f) => f.properties.name)).toContain('Origin Energy Petrol'); // but the synonym still surfaces
+  });
+
+  test('tolerates a typo in the synonym key itself', () => {
+    const withFuel = toGeoJSON({
+      elements: [
+        ...sample.elements,
+        { type: 'node', id: 6004, lat: -13.836, lon: -171.767, tags: { name: 'Blue Bird Petrol Station', amenity: 'fuel' } },
+      ],
+    });
+    const r = search(buildIndex(withFuel.features), 'gasolene');
+    expect(r.some((f) => f.properties.name.includes('Petrol'))).toBe(true);
+  });
+
+  test('marks the matched part of a name, across diacritics', () => {
+    const seg = matchSegments("Papase'ea Sliding Rocks", 'sliding');
+    expect(seg).toEqual([
+      { text: "Papase'ea ", hit: false },
+      { text: 'Sliding', hit: true },
+      { text: ' Rocks', hit: false },
+    ]);
+    // The okina makes the folded string shorter than the original; the mapping
+    // back to original offsets must still land on the right characters.
+    const seg2 = matchSegments("Papase'ea Sliding Rocks", 'papaseea');
+    expect(seg2[0].hit).toBe(true);
+    expect(seg2[0].text).toBe("Papase'ea");
   });
 
   test('finds a place by the name people actually use', () => {
