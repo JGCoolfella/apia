@@ -75,12 +75,13 @@ Resources:
               SSEAlgorithm: AES256
       VersioningConfiguration:
         Status: Enabled
-      LifecycleRules:
-        - Id: expire-noncurrent
-          Status: Enabled
-          NoncurrentVersionExpirationInDays: 30
-          AbortIncompleteMultipartUpload:
-            DaysAfterInitiation: 7
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-noncurrent
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
 
   SiteBucketPolicy:
     Type: AWS::S3::BucketPolicy
