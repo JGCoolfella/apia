@@ -25,7 +25,9 @@ import { BASEMAPS, DEFAULT_BASEMAP } from './basemaps.js';
 import { loadDataset, refreshFromOSM, clearCache } from './data.js';
 import { buildIndex, search, matchSegments } from './search.js';
 import { CATEGORY_ICONS, svgIcon } from './icons.js';
-import { resolvePhoto } from './photos.js';
+import {
+  resolvePhotosBatch, resolveArticle, photosNear, commonsUrls, clearMediaCache,
+} from './photos.js';
 import {
   escapeHTML, distanceMeters, formatDistance, walkingTime, evaluateHours,
   telHref, osmLink, osmEditLink, directionsLinks, joinHighlights, currentApiaTime,
@@ -56,6 +58,9 @@ const state = {
   walks: [],                // resolved walks (stops joined to OSM features)
   walk: null,               // active resolved walk
   walkStep: 0,
+  photoByQid: new Map(),    // wikidata qid -> [commons file names]
+  lightbox: null,           // { items, index }
+  pitched: false,
 };
 
 // Introspection hook, deliberately present in production too: it holds nothing
@@ -122,6 +127,32 @@ async function boot() {
   if (dataset.origin === 'live') {
     toast('Loaded live data straight from OpenStreetMap.');
   }
+
+  prefetchPhotos();
+}
+
+/**
+ * One batched Wikidata call resolves photographs for every linked place on the
+ * map, which is what makes thumbnails in the list affordable. Deliberately not
+ * awaited by boot: the map is fully usable without a single picture, and on a
+ * bad connection in Samoa it may never complete.
+ */
+async function prefetchPhotos() {
+  const qids = state.all.map((f) => f.properties.wikidata).filter(Boolean);
+  if (!qids.length) return;
+  try {
+    const map = await resolvePhotosBatch(qids);
+    if (!map.size) return;
+    state.photoByQid = map;
+    renderList();
+    if (state.selectedId) showDetail(state.selectedId);
+  } catch { /* imagery is an enhancement, never a requirement */ }
+}
+
+/** First Commons thumbnail for a feature, if its own record has one. */
+function thumbFor(props, width = 160) {
+  const files = props.wikidata && state.photoByQid.get(props.wikidata);
+  return files?.length ? commonsUrls(files[0], width).thumb : null;
 }
 
 /**
@@ -182,6 +213,19 @@ function initMap(initial) {
   map.addControl(new FullscreenControl(), 'bottom-right');
   map.getCanvas().setAttribute('tabindex', '0');
 
+  // A 3D tilt toggle, which on a harbour town with hills behind it genuinely
+  // helps you read the terrain rather than being decoration.
+  map.addControl({
+    onAdd() {
+      const el = document.createElement('div');
+      el.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+      el.innerHTML = '<button type="button" id="pitchBtn" title="Tilt the map (3D)" aria-pressed="false">3D</button>';
+      el.querySelector('button').addEventListener('click', togglePitch);
+      return el;
+    },
+    onRemove() {},
+  }, 'bottom-right');
+
   // Set up on style.load, not load: the map's `load` event also waits for the
   // initial tiles, so a slow or unreachable tile server would hold the whole
   // app hostage behind the loading screen. Pins, search and the list need none
@@ -197,6 +241,7 @@ function initMap(initial) {
       const w = state.walks.find((x) => x.id === initial.walk);
       if (w) startWalk(w.id, { step: initial.step ?? 0, fly: !initial.center });
     }
+    if (shouldPlayIntro(initial)) introFlyover();
   });
 
   // Belt and braces: nothing should be able to leave the loading screen up.
@@ -312,10 +357,78 @@ function showNearby(coords) {
   });
 }
 
+const INTRO_KEY = 'apia-map:seen-intro';
+
+/**
+ * The arrival flourish is a first-impression, not a ritual. It plays once per
+ * browser and then never again — a three-second animation on every single
+ * visit is an obstacle, however pretty it is the first time.
+ *
+ * It is also suppressed whenever the link already carried an intention (a view,
+ * a place, a walk), and whenever the user has asked for reduced motion.
+ */
+function shouldPlayIntro(initial) {
+  if (initial.center || initial.sel || initial.walk) return false;
+  if (prefersReducedMotion()) return false;
+  try {
+    if (localStorage.getItem(INTRO_KEY)) return false;
+    localStorage.setItem(INTRO_KEY, String(Date.now()));
+  } catch { /* private mode: play it, harmless */ }
+  return true;
+}
+
+/**
+ * Opening move: start high and wide over Upolu, then settle into Apia with a
+ * slight tilt. Costs nothing (the same tiles load either way) and gives the map
+ * a sense of place before the user touches anything. Any interaction aborts it
+ * immediately — an animation you cannot interrupt is an obstacle, not a
+ * flourish.
+ */
+function introFlyover() {
+  const map = state.map;
+  map.jumpTo({ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM - 2.4, pitch: 42, bearing: -14 });
+
+  const abort = () => {
+    map.stop();
+    // Snap, do not ease. The user is already scrolling or dragging, and
+    // MapLibre's own gesture animation competes with an easeTo — which left
+    // the camera stranded at a couple of degrees of tilt forever. At this
+    // point the tilt is incidental; handing control over cleanly is the goal.
+    map.setPitch(0);
+    map.setBearing(0);
+    off();
+  };
+  const off = () => {
+    for (const ev of ['mousedown', 'wheel', 'touchstart', 'keydown']) map.off(ev, abort);
+  };
+  for (const ev of ['mousedown', 'wheel', 'touchstart', 'keydown']) map.once(ev, abort);
+
+  map.easeTo({
+    center: DEFAULT_CENTER,
+    zoom: DEFAULT_ZOOM,
+    pitch: 0,
+    bearing: 0,
+    duration: 3200,
+    easing: (t) => 1 - Math.pow(1 - t, 3),
+  });
+  map.once('moveend', off);
+}
+
 /**
  * In dark mode the standard OSM raster tiles glare. Dim and desaturate the
  * raster layer itself (not the canvas, which would also recolour the pins).
  */
+function togglePitch() {
+  state.pitched = !state.pitched;
+  const btn = $('#pitchBtn');
+  btn?.setAttribute('aria-pressed', String(state.pitched));
+  btn?.classList.toggle('on', state.pitched);
+  state.map.easeTo({
+    pitch: state.pitched ? 55 : 0,
+    duration: prefersReducedMotion() ? 0 : 700,
+  });
+}
+
 function applyDarkDim() {
   const map = state.map;
   if (!map?.getLayer('basemap')) return;
@@ -629,9 +742,13 @@ function renderList() {
       ? '<span class="badge open">Open</span>'
       : hours.state === 'closed' ? '<span class="badge closed">Closed</span>' : '';
     const pick = state.highlightById.has(p.id) ? '<span class="badge pick">Pick</span>' : '';
+    const thumb = thumbFor(p);
+    const lead = thumb
+      ? `<span class="res-thumb"><img src="${escapeHTML(thumb)}" alt="" loading="lazy" decoding="async"></span>`
+      : catBubble(p.cat);
     return `<li>
-      <button class="result" data-id="${escapeHTML(p.id)}" aria-current="${state.selectedId === p.id}">
-        ${catBubble(p.cat)}
+      <button class="result${thumb ? ' has-thumb' : ''}" data-id="${escapeHTML(p.id)}" aria-current="${state.selectedId === p.id}">
+        ${lead}
         <span class="res-body">
           <span class="res-name">${escapeHTML(p.name)}${badge}${pick}</span>
           <span class="tagline">${escapeHTML(p.kind)}${p.addr ? ' · ' + escapeHTML(p.addr) : ''}</span>
@@ -864,7 +981,7 @@ function showDetail(id) {
     .join('');
 
   $('#detail').innerHTML = `
-    <div class="detail-photo" id="detailPhoto" hidden></div>
+    <div class="detail-hero" id="detailHero" hidden></div>
     <div class="detail-head" style="--cat:${cat.color}">
       <button class="icon-btn ghost detail-close" data-act="close" title="Close"><span aria-hidden="true">✕</span><span class="sr-only">Close</span></button>
       <h2>${escapeHTML(p.name)}</h2>
@@ -879,7 +996,9 @@ function showDetail(id) {
     <div class="detail-body">
       ${hi?.blurb ? `<p class="blurb">${escapeHTML(hi.blurb)}</p>` : ''}
       ${hi?.tip ? `<div class="tip"><b>Local tip</b>${escapeHTML(hi.tip)}</div>` : ''}
+      <div id="detailArticle"></div>
       ${facts.length ? `<div class="facts">${facts.join('')}</div>` : ''}
+      <div id="detailNearby"></div>
       <div class="actions">
         <button class="btn primary" data-act="centre">Centre map</button>
         <button class="btn" data-act="copy">Copy coordinates</button>
@@ -894,43 +1013,147 @@ function showDetail(id) {
     </div>`;
   $('#detail').hidden = false;
 
-  loadDetailPhoto(p);
+  loadDetailMedia(p, coords);
 }
 
 /**
- * Photograph for the place, via its own Wikidata record's P18 image claim on
- * Wikimedia Commons. Only places whose OSM object links a wikidata entity can
- * ever show a photo — nothing is looked up by name, so a picture cannot land
- * on the wrong place. Fails silent: no image is a normal outcome.
+ * Everything visual and encyclopaedic about a place, loaded after the panel is
+ * already on screen so it never delays the facts people actually need.
+ *
+ * Three independent enrichments, each of which may legitimately find nothing:
+ * the place's own photographs (Wikidata), its Wikipedia opening paragraph, and
+ * photographs geotagged nearby (Commons). Each is labelled for what it is.
  */
-async function loadDetailPhoto(p) {
-  if (!p.wikidata) return;
+async function loadDetailMedia(p, coords) {
   const forId = p.id;
-  const photo = await resolvePhoto(p.wikidata).catch(() => null);
-  if (!photo) return;
-  // The user may have moved on while we fetched.
-  if (state.selectedId !== forId) return;
-  const slot = $('#detailPhoto');
-  if (!slot) return;
+  const stillShowing = () => state.selectedId === forId && !$('#detail').hidden;
+
+  // --- The place's own pictures --------------------------------------------
+  const ownFiles = p.wikidata ? (state.photoByQid.get(p.wikidata)
+    || (await resolvePhotosBatch([p.wikidata]).then((m) => m.get(p.wikidata)).catch(() => null))) : null;
+
+  if (ownFiles?.length && stillShowing()) {
+    const items = ownFiles.map((f) => ({ ...commonsUrls(f), caption: p.name }));
+    renderHero(items, p.name);
+  }
+
+  // --- Wikipedia -----------------------------------------------------------
+  if (p.wikipedia) {
+    const article = await resolveArticle(p.wikipedia).catch(() => null);
+    if (article && stillShowing()) {
+      const slot = $('#detailArticle');
+      if (slot) {
+        slot.innerHTML = `
+          <div class="article">
+            <p>${escapeHTML(article.extract)}</p>
+            <a href="${escapeHTML(article.url)}" target="_blank" rel="noopener noreferrer">
+              Read on Wikipedia${article.lang !== 'en' ? ` (${escapeHTML(article.lang)})` : ''} ↗</a>
+          </div>`;
+      }
+      // Fall back to the article's lead image when the entity had none.
+      if (!ownFiles?.length && article.thumb && stillShowing()) {
+        renderHero([{ thumb: article.thumb, full: article.thumb, page: article.url, caption: p.name }], p.name);
+      }
+    }
+  }
+
+  // --- Photographs taken nearby -------------------------------------------
+  const near = await photosNear(coords, { radius: 350, limit: 10 }).catch(() => []);
+  if (near.length && stillShowing()) {
+    const slot = $('#detailNearby');
+    if (!slot) return;
+    const ownSet = new Set((ownFiles || []).map((f) => f.replace(/ /g, '_')));
+    const shots = near.filter((n) => !ownSet.has(n.title.replace(/ /g, '_')));
+    if (!shots.length) return;
+
+    slot.innerHTML = `
+      <div class="nearby-photos">
+        <h3>Photographs taken near here
+          <span title="These images are geotagged within 350 m of this place. They show the area — they are not necessarily pictures of this place itself.">ⓘ</span>
+        </h3>
+        <div class="photo-strip">
+          ${shots.map((s, i) => `
+            <button class="photo-tile" data-near="${i}" title="${escapeHTML(s.title)}">
+              <img src="${escapeHTML(s.thumb)}" alt="${escapeHTML(s.title)}" loading="lazy" decoding="async">
+            </button>`).join('')}
+        </div>
+      </div>`;
+    slot.querySelectorAll('[data-near]').forEach((btn) => {
+      btn.addEventListener('click', () => openLightbox(
+        shots.map((s) => ({ full: s.full, page: s.page, caption: s.title, artist: s.artist, licence: s.licence })),
+        Number(btn.dataset.near),
+      ));
+    });
+  }
+}
+
+/** The photo banner at the top of a detail card, clickable into the lightbox. */
+function renderHero(items, name) {
+  const slot = $('#detailHero');
+  if (!slot || !items.length) return;
+  const first = items[0];
 
   const img = new Image();
-  img.alt = `Photograph of ${p.name}`;
-  // NOT loading='lazy': a lazy image that is not yet in the document never
-  // loads, and this one is only appended once it has loaded. The fetch itself
-  // is already deferred — it only starts when the panel opens.
+  img.alt = `Photograph of ${name}`;
+  img.decoding = 'async';
+  // Appended only once loaded, so a broken or blocked image leaves no gap.
   img.onload = () => {
     slot.innerHTML = '';
     slot.appendChild(img);
-    const credit = document.createElement('a');
-    credit.className = 'photo-credit';
-    credit.href = photo.pageUrl;
-    credit.target = '_blank';
-    credit.rel = 'noopener noreferrer';
-    credit.textContent = 'Wikimedia Commons';
-    slot.appendChild(credit);
+    slot.insertAdjacentHTML('beforeend', `
+      ${items.length > 1 ? `<span class="hero-count">1 / ${items.length}</span>` : ''}
+      <a class="photo-credit" href="${escapeHTML(first.page)}" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>
+      <button class="hero-expand" title="View full size"><span aria-hidden="true">⤢</span><span class="sr-only">View photograph full size</span></button>`);
     slot.hidden = false;
+    slot.querySelector('.hero-expand').addEventListener('click', () => openLightbox(items, 0));
+    img.addEventListener('click', () => openLightbox(items, 0));
   };
-  img.src = photo.thumbUrl;
+  img.src = first.thumb;
+}
+
+// ---------------------------------------------------------------------------
+// Lightbox
+// ---------------------------------------------------------------------------
+
+function openLightbox(items, index = 0) {
+  state.lightbox = { items, index };
+  const box = $('#lightbox');
+  box.hidden = false;
+  document.body.style.overflow = 'hidden';
+  renderLightbox();
+}
+
+function renderLightbox() {
+  const { items, index } = state.lightbox || {};
+  if (!items) return;
+  const it = items[index];
+  const credit = [it.artist, it.licence].filter(Boolean).join(' · ');
+
+  $('#lightbox').innerHTML = `
+    <button class="lb-close" data-lb="close" title="Close (Esc)"><span aria-hidden="true">✕</span><span class="sr-only">Close</span></button>
+    ${items.length > 1 ? '<button class="lb-nav prev" data-lb="prev" title="Previous"><span aria-hidden="true">‹</span></button>' : ''}
+    <figure class="lb-figure">
+      <img src="${escapeHTML(it.full)}" alt="${escapeHTML(it.caption || '')}">
+      <figcaption>
+        <span>${escapeHTML(it.caption || '')}${items.length > 1 ? ` · ${index + 1} of ${items.length}` : ''}</span>
+        <a href="${escapeHTML(it.page)}" target="_blank" rel="noopener noreferrer">
+          ${credit ? escapeHTML(credit) + ' — ' : ''}Wikimedia Commons ↗</a>
+      </figcaption>
+    </figure>
+    ${items.length > 1 ? '<button class="lb-nav next" data-lb="next" title="Next"><span aria-hidden="true">›</span></button>' : ''}`;
+}
+
+function closeLightbox() {
+  state.lightbox = null;
+  $('#lightbox').hidden = true;
+  document.body.style.overflow = '';
+}
+
+function stepLightbox(delta) {
+  if (!state.lightbox) return;
+  const n = state.lightbox.items.length;
+  state.lightbox.index = (state.lightbox.index + delta + n) % n;
+  renderLightbox();
 }
 
 function fact(icon, valueHTML) {
@@ -1025,7 +1248,22 @@ function wireUI() {
   window.addEventListener('offline', setNet);
   setNet();
 
+  $('#lightbox').addEventListener('click', (e) => {
+    const act = e.target.closest('[data-lb]')?.dataset.lb;
+    if (act === 'close') closeLightbox();
+    else if (act === 'prev') stepLightbox(-1);
+    else if (act === 'next') stepLightbox(1);
+    else if (e.target.id === 'lightbox') closeLightbox();   // click the backdrop
+  });
+
   document.addEventListener('keydown', (e) => {
+    // The lightbox is modal: it takes every key while open.
+    if (state.lightbox) {
+      if (e.key === 'Escape') { e.preventDefault(); closeLightbox(); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); stepLightbox(1); }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); stepLightbox(-1); }
+      return;
+    }
     if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'SELECT') {
       if (e.key === 'Escape') document.activeElement.blur();
       return;

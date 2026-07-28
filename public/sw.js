@@ -7,7 +7,7 @@
 //
 // Bump CACHE_VERSION on every deploy that changes the shell.
 
-const CACHE_VERSION = 'apia-v4';
+const CACHE_VERSION = 'apia-v5';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const TILE_CACHE = `${CACHE_VERSION}-tiles`;
 const MAX_TILES = 1200;

@@ -49,6 +49,9 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function open(page) {
+  // Arrive as a returning visitor: the one-time intro flyover has been seen,
+  // so the viewport is still and assertions are not racing an animation.
+  await page.addInitScript(() => localStorage.setItem('apia-map:seen-intro', '1'));
   await page.goto('/');
   await expect(page.locator('#loading')).toBeHidden({ timeout: 20_000 });
 }
@@ -306,41 +309,180 @@ test('right-click answers "what is near this point"', async ({ page }) => {
   await expect(detail.locator('h2')).not.toHaveText('Near this point');
 });
 
-test('a wikidata-tagged place shows its Commons photo, attributed', async ({ page }) => {
-  // Stub the place's own authority record: P18 -> a Commons file, and the
-  // Special:FilePath thumbnail request -> a real PNG.
-  await page.route(/www\.wikidata\.org\/w\/api\.php.*wbgetclaims/, (route) =>
+/** Stub the whole media pipeline: entity claims, article, geosearch, images. */
+async function stubMedia(page, { photos = ['RLS Museum.jpg'], nearby = 3 } = {}) {
+  await page.route(/www\.wikidata\.org\/w\/api\.php/, (route) => {
+    const ids = new URL(route.request().url()).searchParams.get('ids')?.split('|') || [];
+    const entities = {};
+    for (const id of ids) {
+      entities[id] = { claims: photos.length
+        ? { P18: photos.map((f) => ({ mainsnak: { datavalue: { value: f } } })) }
+        : {} };
+    }
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify({ entities }) });
+  });
+
+  await page.route(/wikipedia\.org\/api\/rest_v1/, (route) =>
     route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
-        claims: { P18: [{ mainsnak: { datavalue: { value: 'RLS Museum test.jpg' } } }] },
+        extract: 'A test summary of the place from Wikipedia.',
+        content_urls: { desktop: { page: 'https://en.wikipedia.org/wiki/Test' } },
       }),
     }));
-  await page.route(/commons\.wikimedia\.org\/wiki\/Special:FilePath/, (route) =>
-    route.fulfill({ contentType: 'image/png', body: BLANK_PNG }));
 
+  await page.route(/commons\.wikimedia\.org\/w\/api\.php/, (route) => {
+    const pages = {};
+    for (let i = 0; i < nearby; i++) {
+      pages[i] = {
+        title: `File:Nearby ${i}.jpg`,
+        imageinfo: [{
+          thumburl: 'https://upload.wikimedia.org/thumb.png',
+          url: 'https://upload.wikimedia.org/full.png',
+          descriptionurl: `https://commons.wikimedia.org/wiki/File:Nearby_${i}.jpg`,
+          extmetadata: { Artist: { value: 'Someone' }, LicenseShortName: { value: 'CC BY 4.0' } },
+        }],
+      };
+    }
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify({ query: { pages } }) });
+  });
+
+  // Every image origin the app can pull from.
+  await page.route(/commons\.wikimedia\.org\/wiki\/Special:FilePath|upload\.wikimedia\.org/, (route) =>
+    route.fulfill({ contentType: 'image/png', body: BLANK_PNG }));
+}
+
+test('a linked place shows its own photo, its article and nearby photographs', async ({ page }) => {
+  await stubMedia(page);
   await open(page);
   await page.locator('#searchInput').fill('stevenson museum');
   await page.locator('#searchResults [role="option"] button').first().click();
 
-  const photo = page.locator('#detailPhoto');
-  await expect(photo).toBeVisible();
-  await expect(photo.locator('img')).toHaveAttribute('alt', /Robert Louis Stevenson/);
-  // Attribution is not optional for Commons media.
-  await expect(photo.locator('a.photo-credit')).toHaveAttribute(
-    'href', /commons\.wikimedia\.org\/wiki\/File:/);
+  // 1. The place's own picture leads the card, credited.
+  const hero = page.locator('#detailHero');
+  await expect(hero).toBeVisible();
+  await expect(hero.locator('img')).toHaveAttribute('alt', /Robert Louis Stevenson/);
+  await expect(hero.locator('a.photo-credit')).toHaveAttribute('href', /commons\.wikimedia\.org\/wiki\/File:/);
+
+  // 2. The Wikipedia opening paragraph.
+  await expect(page.locator('#detailArticle')).toContainText('A test summary');
+
+  // 3. Nearby photographs, labelled as *near*, not *of*.
+  const strip = page.locator('.nearby-photos');
+  await expect(strip).toBeVisible();
+  await expect(strip.locator('h3')).toContainText(/near here/i);
+  expect(await strip.locator('.photo-tile').count()).toBeGreaterThan(0);
 });
 
-test('a place with no wikidata record simply shows no photo', async ({ page }) => {
-  let wikidataCalled = false;
-  await page.route(/www\.wikidata\.org/, (route) => { wikidataCalled = true; route.abort(); });
+test('the lightbox opens, navigates and closes', async ({ page }) => {
+  await stubMedia(page, { photos: ['A.jpg', 'B.jpg'] });
+  await open(page);
+  await page.locator('#searchInput').fill('stevenson museum');
+  await page.locator('#searchResults [role="option"] button').first().click();
+  await expect(page.locator('#detailHero')).toBeVisible();
+
+  await page.locator('.hero-expand').click();
+  const lb = page.locator('#lightbox');
+  await expect(lb).toBeVisible();
+  await expect(lb.locator('figcaption')).toContainText('1 of 2');
+  await expect(lb.locator('figcaption a')).toContainText('Wikimedia Commons');
+
+  await page.keyboard.press('ArrowRight');
+  await expect(lb.locator('figcaption')).toContainText('2 of 2');
+  await page.keyboard.press('ArrowLeft');
+  await expect(lb.locator('figcaption')).toContainText('1 of 2');
+
+  await page.keyboard.press('Escape');
+  await expect(lb).toBeHidden();
+});
+
+test('a place with no linked record shows no photo and is never looked up', async ({ page }) => {
+  const askedFor = [];
+  await page.route(/www\.wikidata\.org/, (route) => {
+    const ids = new URL(route.request().url()).searchParams.get('ids') || '';
+    askedFor.push(...ids.split('|').filter(Boolean));
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify({ entities: {} }) });
+  });
+  await page.route(/commons\.wikimedia\.org|wikipedia\.org|upload\.wikimedia\.org/, (r) => r.abort());
 
   await open(page);
   await page.locator('#searchInput').fill('amanaki');
   await page.locator('#searchResults [role="option"] button').first().click();
   await expect(page.locator('#detail h2')).toHaveText('Amanaki Café');
-  await expect(page.locator('#detailPhoto')).toBeHidden();
-  expect(wikidataCalled).toBe(false); // no wikidata tag -> no lookup at all
+  await expect(page.locator('#detailHero')).toBeHidden();
+
+  // The batch may run for other, linked places — but this café contributes no
+  // identifier to it, which is exactly why it can never receive a photo.
+  const cafeQid = await page.evaluate(() =>
+    window.__apia.all.find((f) => f.properties.name.startsWith('Amanaki'))?.properties.wikidata);
+  expect(cafeQid).toBeUndefined();
+  expect(askedFor).not.toContain(undefined);
+});
+
+test('list rows show a thumbnail for places that have one', async ({ page }) => {
+  await stubMedia(page);
+  await open(page);
+  // The batch prefetch runs after boot, then re-renders the list.
+  await expect(page.locator('#results .result.has-thumb img').first()).toBeVisible({ timeout: 15_000 });
+});
+
+test('the 3D tilt control pitches the map and back', async ({ page }) => {
+  await open(page);
+  expect(await page.evaluate(() => window.__apia.map.getPitch())).toBe(0);
+  await page.locator('#pitchBtn').click();
+  await expect.poll(() => page.evaluate(() => window.__apia.map.getPitch())).toBeGreaterThan(30);
+  await page.locator('#pitchBtn').click();
+  await expect.poll(() => page.evaluate(() => window.__apia.map.getPitch())).toBe(0);
+});
+
+test.describe('intro flyover', () => {
+  /** A genuinely first-time visitor: no seen-intro flag. */
+  const openFresh = async (page) => {
+    await page.goto('/');
+    await expect(page.locator('#loading')).toBeHidden({ timeout: 20_000 });
+  };
+
+  test('plays on a first visit and settles level at the default view', async ({ page }) => {
+    await openFresh(page);
+    // It starts pitched and zoomed out...
+    const early = await page.evaluate(() => ({
+      pitch: window.__apia.map.getPitch(), zoom: window.__apia.map.getZoom(),
+    }));
+    expect(early.pitch).toBeGreaterThan(10);
+    // ...and ends level, at the intended view.
+    await expect.poll(() => page.evaluate(() => window.__apia.map.getPitch()), { timeout: 8000 }).toBe(0);
+    const zoom = await page.evaluate(() => window.__apia.map.getZoom());
+    expect(Math.abs(zoom - 13.5)).toBeLessThan(0.2);
+  });
+
+  test('aborts the moment the user touches the map', async ({ page }) => {
+    // An animation you cannot interrupt is an obstacle. Scrolling must win
+    // immediately, not after three seconds of being flown somewhere.
+    await openFresh(page);
+    const box = await page.locator('#map').boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, -240);
+    await expect.poll(() => page.evaluate(() => window.__apia.map.getPitch()), { timeout: 3000 }).toBe(0);
+  });
+
+  test('plays only once per browser, never again', async ({ page }) => {
+    await openFresh(page);
+    await expect.poll(() => page.evaluate(() => window.__apia.map.getPitch()), { timeout: 8000 }).toBe(0);
+    // Second visit in the same browser: straight to the map, no animation.
+    await page.reload();
+    await expect(page.locator('#loading')).toBeHidden({ timeout: 20_000 });
+    expect(await page.evaluate(() => window.__apia.map.getPitch())).toBe(0);
+  });
+
+  test('a deep link suppresses it entirely', async ({ page }) => {
+    // The flourish must not fight a user who arrived somewhere specific.
+    await page.goto('/#map=16.00/-13.83300/-171.76500');
+    await expect(page.locator('#loading')).toBeHidden({ timeout: 20_000 });
+    await page.waitForTimeout(600);
+    const z = await page.evaluate(() => window.__apia.map.getZoom());
+    expect(Math.abs(z - 16)).toBeLessThan(0.4);   // still where the link asked for
+    expect(await page.evaluate(() => window.__apia.map.getPitch())).toBe(0);
+  });
 });
 
 test('keyboard help opens with ?', async ({ page }) => {

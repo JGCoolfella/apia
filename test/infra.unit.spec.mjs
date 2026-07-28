@@ -54,15 +54,19 @@ test.describe('CloudFront response headers policy', () => {
     }
   });
 
-  test('allows the photo pipeline: Wikidata lookups and Commons images', () => {
-    // The photo feature resolves a place's own wikidata P18 claim, then loads
-    // the Commons thumbnail — which redirects to upload.wikimedia.org, so BOTH
-    // image hosts must be present or photos break only in production.
+  test('allows the whole media pipeline: Wikidata, Wikipedia and Commons', () => {
+    // Three fetch targets (entity claims, article summaries, Commons geosearch)
+    // and three image origins — the Commons thumbnail redirects to
+    // upload.wikimedia.org and Wikipedia lead images come from *.wikipedia.org,
+    // so a missing host here breaks imagery only in production.
     const connect = csp.match(/connect-src[^;]+/)[0];
     const img = csp.match(/img-src[^;]+/)[0];
-    expect(connect).toContain('https://www.wikidata.org');
-    expect(img).toContain('https://commons.wikimedia.org');
-    expect(img).toContain('https://upload.wikimedia.org');
+    for (const host of ['https://www.wikidata.org', 'https://commons.wikimedia.org', 'https://*.wikipedia.org']) {
+      expect(connect, `connect-src missing ${host}`).toContain(host);
+    }
+    for (const host of ['https://commons.wikimedia.org', 'https://upload.wikimedia.org', 'https://*.wikipedia.org']) {
+      expect(img, `img-src missing ${host}`).toContain(host);
+    }
   });
 
   test('keeps the restrictive directives that make the policy worth having', () => {
