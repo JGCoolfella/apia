@@ -145,24 +145,23 @@ export async function resolveArticle(tag, fetchImpl = fetch) {
 // ---------------------------------------------------------------------------
 
 /**
- * Commons images whose own geotag falls within `radius` metres of the point.
+ * Commons images whose own geotag falls within `radius` metres of the point,
+ * each with its geotag coordinates, distance, mime type and subject categories
+ * — everything the relevance engine needs to decide what a picture shows.
  *
- * These are pictures taken NEAR the place, not pictures OF it — a distinction
- * the interface has to keep, because a photo of the harbour taken from a café
- * terrace is not a photo of the café.
- *
- * @returns {Promise<Array<{thumb:string, full:string, page:string, title:string,
- *   artist?:string, licence?:string, metres:number}>>}
+ * @returns {Promise<Array<{title, thumb, full, page, artist?, licence?,
+ *   metres:number, coords?:[lng,lat], mime?:string, categories:string[]}>>}
  */
-export async function photosNear([lng, lat], { radius = 400, limit = 12, fetchImpl = fetch } = {}) {
-  const key = `geo:${lat.toFixed(4)},${lng.toFixed(4)},${radius}`;
+export async function photosNear([lng, lat], { radius = 400, limit = 30, fetchImpl = fetch } = {}) {
+  const key = `geo2:${lat.toFixed(4)},${lng.toFixed(4)},${radius}`;
   const hit = cached(key);
   if (hit !== undefined) return hit;
 
   const url = 'https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*'
     + '&generator=geosearch&ggsnamespace=6'
     + `&ggscoord=${lat}|${lng}&ggsradius=${radius}&ggslimit=${limit}`
-    + '&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=400'
+    + '&prop=imageinfo|coordinates|categories&coprimary=primary&cllimit=max&clshow=!hidden'
+    + '&iiprop=url|mime|extmetadata&iiurlwidth=400'
     + '&iiextmetadatafilter=Artist|LicenseShortName';
 
   try {
@@ -173,6 +172,7 @@ export async function photosNear([lng, lat], { radius = 400, limit = 12, fetchIm
     const out = pages.map((p) => {
       const info = p.imageinfo?.[0] || {};
       const meta = info.extmetadata || {};
+      const co = p.coordinates?.[0];
       return {
         title: String(p.title || '').replace(/^File:/, ''),
         thumb: info.thumburl,
@@ -180,9 +180,13 @@ export async function photosNear([lng, lat], { radius = 400, limit = 12, fetchIm
         page: info.descriptionurl,
         artist: stripHtml(meta.Artist?.value),
         licence: meta.LicenseShortName?.value,
-        metres: Math.round(p.index != null ? 0 : 0),
+        mime: info.mime,
+        categories: (p.categories || []).map((c) => String(c.title || '').replace(/^Category:/, '')),
+        coords: co ? [co.lon, co.lat] : undefined,
+        metres: co ? Math.round(haversine([lng, lat], [co.lon, co.lat])) : radius,
       };
     }).filter((p) => p.thumb);
+    out.sort((a, b) => a.metres - b.metres);
     store(key, out);
     return out;
   } catch {
@@ -190,8 +194,80 @@ export async function photosNear([lng, lat], { radius = 400, limit = 12, fetchIm
   }
 }
 
+function haversine([lng1, lat1], [lng2, lat2]) {
+  const R = 6371008.8;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const h = Math.sin(toRad(lat2 - lat1) / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(toRad(lng2 - lng1) / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
 function stripHtml(s) {
   if (!s) return undefined;
   const t = String(s).replace(/<[^>]*>/g, '').trim();
   return t.length > 80 ? `${t.slice(0, 77)}…` : t || undefined;
+}
+
+// ---------------------------------------------------------------------------
+// 4. Relevance: which nearby photographs actually show THIS place?
+// ---------------------------------------------------------------------------
+
+/** Files that are cartography or insignia, not photography. */
+const JUNK_TITLE = /\b(map|maps|logo|flag|coat of arms|locator|diagram|plan|chart|stamp|seal|emblem|banknote|coin)\b/i;
+const JUNK_MIME = new Set(['image/svg+xml', 'application/pdf', 'image/gif']);
+
+/** Words too common around Samoa to indicate a subject on their own. */
+const WEAK_TOKENS = new Set([
+  'the', 'of', 'and', 'in', 'at', 'a', 'la', 'le', 'de', 'du', 'des',
+  'samoa', 'samoan', 'upolu', 'savaii', 'apia', 'island', 'islands',
+  'new', 'old', 'view', 'street', 'road', 'building', 'photo', 'img', 'image', 'file', 'jpg',
+]);
+
+function tokens(s) {
+  return String(s || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[ʻʼ‘’']/g, '')
+    .toLowerCase().split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 3 && !WEAK_TOKENS.has(t) && !/^\d+$/.test(t));
+}
+
+/**
+ * How strongly a photo's own metadata (title + subject categories) names the
+ * place. This runs ONLY on photos already inside the place's geofence — the
+ * geotag establishes "here"; the name similarity establishes "of", never the
+ * other way round. Returns the count of significant matched tokens.
+ */
+export function photoNameScore(placeNames, photo) {
+  const placeTokens = new Set(placeNames.flatMap(tokens));
+  if (!placeTokens.size) return 0;
+  const photoTokens = new Set([...tokens(photo.title), ...(photo.categories || []).flatMap(tokens)]);
+  let hits = 0;
+  for (const t of placeTokens) if (photoTokens.has(t)) hits++;
+  return hits;
+}
+
+/**
+ * Split geofenced photos into pictures OF the place and pictures AROUND it.
+ *
+ * "Of" needs both legs: inside the tight radius AND named for the place (or
+ * practically on top of it — within `hugMetres`, where whatever the camera
+ * pointed at, this place fills the frame or frames the shot). Junk files are
+ * dropped entirely.
+ *
+ * @param {string[]} placeNames the place's name and known aliases
+ */
+export function classifyPhotos(placeNames, photos, { radius = 90, hugMetres = 35 } = {}) {
+  const of = [];
+  const around = [];
+  for (const p of photos) {
+    if (JUNK_MIME.has(p.mime) || JUNK_TITLE.test(p.title)) continue;
+    const score = photoNameScore(placeNames, p);
+    if (p.metres <= radius && (score >= 1 || p.metres <= hugMetres)) {
+      of.push({ ...p, score });
+    } else {
+      around.push({ ...p, score });
+    }
+  }
+  // Best-named first, closest breaking ties.
+  of.sort((a, b) => (b.score - a.score) || (a.metres - b.metres));
+  return { of, around };
 }

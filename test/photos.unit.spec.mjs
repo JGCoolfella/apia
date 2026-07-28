@@ -160,3 +160,68 @@ test.describe('Commons geosearch', () => {
     expect(await photosNear([-171.7, -13.8], { fetchImpl })).toEqual([]);
   });
 });
+
+const { classifyPhotos, photoNameScore } = await import('../src/photos.js');
+
+test.describe('photo relevance', () => {
+  const shot = (title, metres, extra = {}) => ({
+    title, metres, thumb: 't', full: 'f', page: 'p', mime: 'image/jpeg', categories: [], ...extra,
+  });
+  const names = ['Cathedral of the Immaculate Conception', 'Mulivai Cathedral'];
+
+  test('a geofenced photo named for the place is OF it', () => {
+    const { of } = classifyPhotos(names, [shot('Immaculate Conception Cathedral Apia 2019.jpg', 40)]);
+    expect(of).toHaveLength(1);
+    expect(of[0].score).toBeGreaterThanOrEqual(2);
+  });
+
+  test('a subject category counts even when the filename says nothing', () => {
+    const { of } = classifyPhotos(names, [
+      shot('DSC 04512.jpg', 60, { categories: ['Cathedral of the Immaculate Conception, Apia'] }),
+    ]);
+    expect(of).toHaveLength(1);
+  });
+
+  test('a nearby but unrelated photo stays AROUND, not OF', () => {
+    const { of, around } = classifyPhotos(names, [shot('Fish market stalls.jpg', 80)]);
+    expect(of).toHaveLength(0);
+    expect(around).toHaveLength(1);
+  });
+
+  test('practically on top of the place counts as OF even unnamed', () => {
+    // 20 m away, the place fills the frame or frames the shot.
+    const { of } = classifyPhotos(names, [shot('Evening light.jpg', 20)]);
+    expect(of).toHaveLength(1);
+  });
+
+  test('a name match outside the geofence is NOT promoted', () => {
+    // Same-named place across town: the fence always wins over the name.
+    const { of, around } = classifyPhotos(names, [shot('Immaculate Conception Cathedral.jpg', 300)], { radius: 90 });
+    expect(of).toHaveLength(0);
+    expect(around).toHaveLength(1);
+  });
+
+  test('maps, logos and vector files are junk, never shown', () => {
+    const { of, around } = classifyPhotos(names, [
+      shot('Map of Apia.png', 10),
+      shot('Cathedral logo.png', 10),
+      shot('Diagram.svg', 10, { mime: 'image/svg+xml' }),
+      shot('Flag of Samoa.png', 10),
+    ]);
+    expect(of).toHaveLength(0);
+    expect(around).toHaveLength(0);
+  });
+
+  test('weak tokens alone never make a match', () => {
+    // "Apia", "Samoa", "street", "view" appear in half of Commons around here.
+    expect(photoNameScore(['Apia Harbour View Hotel'], shot('Street view, Apia, Samoa.jpg', 50))).toBe(0);
+  });
+
+  test('best-named photos sort first within OF', () => {
+    const { of } = classifyPhotos(names, [
+      shot('Old church door.jpg', 20),
+      shot('Mulivai Cathedral facade.jpg', 70),
+    ]);
+    expect(of[0].title).toContain('Mulivai');
+  });
+});

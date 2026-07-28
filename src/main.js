@@ -27,6 +27,7 @@ import { buildIndex, search, matchSegments } from './search.js';
 import { CATEGORY_ICONS, svgIcon } from './icons.js';
 import {
   resolvePhotosBatch, resolveArticle, photosNear, commonsUrls, clearMediaCache,
+  classifyPhotos,
 } from './photos.js';
 import {
   escapeHTML, distanceMeters, formatDistance, walkingTime, evaluateHours,
@@ -61,6 +62,7 @@ const state = {
   walk: null,               // active resolved walk
   walkStep: 0,
   photoByQid: new Map(),    // wikidata qid -> [commons file names]
+  photoShots: [],           // nearby photographs currently dotted on the map
   lightbox: null,           // { items, index }
   pitched: false,
 };
@@ -296,7 +298,15 @@ function initMap(initial) {
     }
   });
 
-  for (const layer of ['poi', 'clusters', 'walk-stops']) {
+  map.on('click', 'photo-dots', (e) => {
+    const i = e.features?.[0]?.properties?.i;
+    if (i === undefined || !state.photoShots?.length) return;
+    openLightbox(state.photoShots.map((s) => ({
+      full: s.full, page: s.page, caption: s.title, artist: s.artist, licence: s.licence,
+    })), Number(i));
+  });
+
+  for (const layer of ['poi', 'clusters', 'walk-stops', 'photo-dots']) {
     map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
   }
@@ -683,6 +693,20 @@ function addLayers(map) {
     paint: { 'text-color': '#ffffff' },
   });
 
+  // Where nearby photographs were taken, from their own embedded geotags.
+  map.addSource('photo-dots', { type: 'geojson', data: EMPTY_FC });
+  map.addLayer({
+    id: 'photo-dots',
+    type: 'circle',
+    source: 'photo-dots',
+    paint: {
+      'circle-radius': 6,
+      'circle-color': '#ffffff',
+      'circle-stroke-color': '#7c3aed',
+      'circle-stroke-width': 2.5,
+    },
+  });
+
   map.addSource('measure', { type: 'geojson', data: EMPTY_FC });
   map.addLayer({
     id: 'measure-line',
@@ -949,6 +973,7 @@ function closeDetail() {
   state.selectedId = null;
   $('#detail').hidden = true;
   highlightOnMap(null);
+  clearPhotoDots();
   renderList();
   writeHash();
 }
@@ -1176,6 +1201,7 @@ function showDetail(id) {
     </div>`;
   $('#detail').hidden = false;
 
+  clearPhotoDots();
   loadDetailMedia(p, coords);
 }
 
@@ -1190,6 +1216,7 @@ function showDetail(id) {
 async function loadDetailMedia(p, coords) {
   const forId = p.id;
   const stillShowing = () => state.selectedId === forId && !$('#detail').hidden;
+  let heroSet = false;
 
   // --- The place's own pictures --------------------------------------------
   const ownFiles = p.wikidata ? (state.photoByQid.get(p.wikidata)
@@ -1198,6 +1225,7 @@ async function loadDetailMedia(p, coords) {
   if (ownFiles?.length && stillShowing()) {
     const items = ownFiles.map((f) => ({ ...commonsUrls(f), caption: p.name }));
     renderHero(items, p.name);
+    heroSet = true;
   }
 
   // --- Wikipedia -----------------------------------------------------------
@@ -1214,40 +1242,108 @@ async function loadDetailMedia(p, coords) {
           </div>`;
       }
       // Fall back to the article's lead image when the entity had none.
-      if (!ownFiles?.length && article.thumb && stillShowing()) {
+      if (!heroSet && article.thumb && stillShowing()) {
         renderHero([{ thumb: article.thumb, full: article.thumb, page: article.url, caption: p.name }], p.name);
+        heroSet = true;
       }
     }
   }
 
-  // --- Photographs taken nearby -------------------------------------------
-  const near = await photosNear(coords, { radius: 350, limit: 10 }).catch(() => []);
-  if (near.length && stillShowing()) {
-    const slot = $('#detailNearby');
-    if (!slot) return;
-    const ownSet = new Set((ownFiles || []).map((f) => f.replace(/ /g, '_')));
-    const shots = near.filter((n) => !ownSet.has(n.title.replace(/ /g, '_')));
-    if (!shots.length) return;
+  // --- Nearby photography, sorted into OF and AROUND ------------------------
+  //
+  // The geofence is sized to what the place physically is: a shopfront is not
+  // an airport. Inside the fence, title and category matching decides which
+  // pictures actually show the place; the rest stay honestly labelled as the
+  // area. The fence comes first, always — a perfect title match across town is
+  // a different place with the same name, not a photo of this one.
+  const radius = photoRadiusFor(p);
+  const near = await photosNear(coords, { radius, limit: 30 }).catch(() => []);
+  if (!near.length || !stillShowing()) return;
 
-    slot.innerHTML = `
-      <div class="nearby-photos">
-        <h3>Photographs taken near here
-          <span title="These images are geotagged within 350 m of this place. They show the area — they are not necessarily pictures of this place itself.">ⓘ</span>
-        </h3>
-        <div class="photo-strip">
-          ${shots.map((s, i) => `
-            <button class="photo-tile" data-near="${i}" title="${escapeHTML(s.title)}">
-              <img src="${escapeHTML(s.thumb)}" alt="${escapeHTML(s.title)}" loading="lazy" decoding="async">
-            </button>`).join('')}
-        </div>
-      </div>`;
-    slot.querySelectorAll('[data-near]').forEach((btn) => {
-      btn.addEventListener('click', () => openLightbox(
-        shots.map((s) => ({ full: s.full, page: s.page, caption: s.title, artist: s.artist, licence: s.licence })),
-        Number(btn.dataset.near),
-      ));
-    });
+  const ownSet = new Set((ownFiles || []).map((f) => f.replace(/ /g, '_')));
+  const fresh = near.filter((n) => !ownSet.has(n.title.replace(/ /g, '_')));
+  const names = [p.name, p.name_sm, p.tags?.alt_name, p.tags?.old_name, p.tags?.official_name].filter(Boolean);
+  const { of, around } = classifyPhotos(names, fresh, { radius });
+
+  // No own image anywhere, but confidently-named photos at the doorstep? Lead
+  // with the best of them, labelled for exactly what it is.
+  if (!heroSet && of.length && of[0].score >= 2 && stillShowing()) {
+    renderHero([{
+      thumb: of[0].thumb, full: of[0].full, page: of[0].page,
+      caption: `${p.name} (matched nearby photograph)`,
+    }], p.name);
   }
+
+  const slot = $('#detailNearby');
+  if (!slot) return;
+  const strip = (shots, offset = 0) => shots.map((s, i) => `
+    <button class="photo-tile" data-shot="${offset + i}" title="${escapeHTML(s.title)}${s.metres ? ` · ${s.metres} m` : ''}">
+      <img src="${escapeHTML(s.thumb)}" alt="${escapeHTML(s.title)}" loading="lazy" decoding="async">
+    </button>`).join('');
+
+  const aroundShown = of.length >= 3 ? around.slice(0, 4) : around.slice(0, 8);
+  slot.innerHTML = `
+    ${of.length ? `
+      <div class="nearby-photos">
+        <h3>Photographs of ${escapeHTML(shortName(p.name))}
+          <span title="Geotagged within ${radius} m of this place and named or categorised for it on Wikimedia Commons.">ⓘ</span>
+        </h3>
+        <div class="photo-strip">${strip(of)}</div>
+      </div>` : ''}
+    ${aroundShown.length ? `
+      <div class="nearby-photos around">
+        <h3>Around here
+          <span title="Photographs geotagged nearby. They show the area — not necessarily this place itself.">ⓘ</span>
+        </h3>
+        <div class="photo-strip">${strip(aroundShown, of.length)}</div>
+      </div>` : ''}`;
+
+  const all = [...of, ...aroundShown];
+  slot.querySelectorAll('[data-shot]').forEach((btn) => {
+    btn.addEventListener('click', () => openLightbox(
+      all.map((s) => ({ full: s.full, page: s.page, caption: s.title, artist: s.artist, licence: s.licence })),
+      Number(btn.dataset.shot),
+    ));
+  });
+
+  showPhotoDots(all, coords);
+}
+
+/** How wide "at this place" plausibly is, in metres. */
+function photoRadiusFor(p) {
+  if (['Airport', 'Ferry terminal', 'Bus terminal'].includes(p.kind)) return 350;
+  if (p.cat === 'places') return 500;
+  if (p.cat === 'outdoors') return 250;
+  return 90;
+}
+
+function shortName(name) {
+  return name.length > 28 ? `${name.slice(0, 26)}…` : name;
+}
+
+/**
+ * Camera dots on the map at each photograph's own geotag — where the pictures
+ * were taken, from their embedded coordinates. Click one to view it.
+ */
+function showPhotoDots(shots, placeCoords) {
+  const src = state.map?.getSource('photo-dots');
+  if (!src) return;
+  const items = shots.filter((s) => s.coords);
+  src.setData({
+    type: 'FeatureCollection',
+    features: items.map((s, i) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: s.coords },
+      properties: { i, title: s.title },
+    })),
+  });
+  state.photoShots = items;
+  void placeCoords;
+}
+
+function clearPhotoDots() {
+  state.map?.getSource('photo-dots')?.setData(EMPTY_FC);
+  state.photoShots = [];
 }
 
 /** The photo banner at the top of a detail card, clickable into the lightbox. */

@@ -335,18 +335,27 @@ async function stubMedia(page, { photos = ['RLS Museum.jpg'], nearby = 3 } = {})
     }));
 
   await page.route(/commons\.wikimedia\.org\/w\/api\.php/, (route) => {
-    const pages = {};
-    for (let i = 0; i < nearby; i++) {
-      pages[i] = {
-        title: `File:Nearby ${i}.jpg`,
-        imageinfo: [{
-          thumburl: 'https://upload.wikimedia.org/thumb.png',
-          url: 'https://upload.wikimedia.org/full.png',
-          descriptionurl: `https://commons.wikimedia.org/wiki/File:Nearby_${i}.jpg`,
-          extmetadata: { Artist: { value: 'Someone' }, LicenseShortName: { value: 'CC BY 4.0' } },
-        }],
-      };
-    }
+    // The FIXTURE's museum sits at (-171.7710, -13.8510) — offsets are from
+    // there. A mixed bag: one photo named for the place at its doorstep,
+    // generic ones further out, and a junk map.
+    const mk = (i, title, dLat, extra = {}) => [i, {
+      title: `File:${title}`,
+      coordinates: [{ lat: -13.8510 + dLat, lon: -171.7710, primary: '' }],
+      categories: extra.categories?.map((c) => ({ title: `Category:${c}` })) || [],
+      imageinfo: [{
+        thumburl: 'https://upload.wikimedia.org/thumb.png',
+        url: 'https://upload.wikimedia.org/full.png',
+        descriptionurl: `https://commons.wikimedia.org/wiki/File:${title.replace(/ /g, '_')}`,
+        mime: extra.mime || 'image/jpeg',
+        extmetadata: { Artist: { value: 'Someone' }, LicenseShortName: { value: 'CC BY 4.0' } },
+      }],
+    }];
+    const pages = Object.fromEntries([
+      mk(1, 'Robert Louis Stevenson Museum facade.jpg', 0.0004),   // ~45 m, named -> OF
+      mk(2, 'Nearby unrelated 1.jpg', 0.0055),                     // ~600 m -> AROUND (if fetched)
+      mk(3, 'Nearby unrelated 2.jpg', 0.0007),                     // ~80 m, unnamed -> AROUND
+      mk(4, 'Map of Vailima.png', 0.0001),                         // junk: never shown
+    ].slice(0, Math.max(nearby, 1)));
     route.fulfill({ contentType: 'application/json', body: JSON.stringify({ query: { pages } }) });
   });
 
@@ -370,11 +379,22 @@ test('a linked place shows its own photo, its article and nearby photographs', a
   // 2. The Wikipedia opening paragraph.
   await expect(page.locator('#detailArticle')).toContainText('A test summary');
 
-  // 3. Nearby photographs, labelled as *near*, not *of*.
-  const strip = page.locator('.nearby-photos');
-  await expect(strip).toBeVisible();
-  await expect(strip.locator('h3')).toContainText(/near here/i);
-  expect(await strip.locator('.photo-tile').count()).toBeGreaterThan(0);
+  // 3. Nearby photography, classified: pictures OF the place separated from
+  //    pictures of the area, and junk cartography nowhere at all.
+  const ofStrip = page.locator('.nearby-photos').first();
+  await expect(ofStrip).toBeVisible();
+  await expect(ofStrip.locator('h3')).toContainText(/Photographs of/i);
+  await expect(ofStrip.locator('.photo-tile').first())
+    .toHaveAttribute('title', /Robert Louis Stevenson Museum facade/i);
+
+  const around = page.locator('.nearby-photos.around');
+  await expect(around.locator('h3')).toContainText(/Around here/i);
+  await expect(page.locator('#detailNearby')).not.toContainText('Map of Vailima');
+
+  // 4. Camera dots on the map at the photographs' own geotags.
+  const dots = await page.evaluate(() =>
+    window.__apia.map.queryRenderedFeatures({ layers: ['photo-dots'] }).length);
+  expect(dots).toBeGreaterThan(0);
 });
 
 test('the lightbox opens, navigates and closes', async ({ page }) => {

@@ -327,6 +327,7 @@ mark {
   color: var(--fg-muted); margin-bottom: 8px;
 }
 .nearby-photos h3 span { cursor: help; opacity: .65; }
+.nearby-photos.around .photo-tile { width: 88px; height: 64px; opacity: .92; }
 .photo-strip {
   display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;
   scrollbar-width: thin;
