@@ -542,13 +542,31 @@ test('the welcome card appears once and can start a walk', async ({ page }) => {
   await expect(page.locator('#welcome')).toBeHidden();
 });
 
-test('without the vector archive the map falls back to raster tiles', async ({ page }) => {
-  // The dev checkout carries no samoa.pmtiles, so the probe must fail cleanly
-  // and leave the raster default in place.
+test('with the archive present the map upgrades itself to vector', async ({ page }) => {
+  // The checkout now carries the real samoa.pmtiles; the boot probe must find
+  // it and choose the self-hosted vector basemap without being asked.
   await open(page);
-  const styleSources = await page.evaluate(() => Object.keys(window.__apia.map.getStyle().sources));
-  expect(styleSources).toContain('basemap');       // raster source
-  expect(styleSources).not.toContain('protomaps'); // no phantom vector source
+  const info = await page.evaluate(() => ({
+    basemap: window.__apia.basemap,
+    sources: Object.keys(window.__apia.map.getStyle().sources),
+  }));
+  expect(info.basemap).toBe('vector');
+  expect(info.sources).toContain('protomaps');
+});
+
+test('without the vector archive the map falls back to raster tiles', async ({ page }) => {
+  // A deployment without the archive (or an offline probe) must fall back
+  // cleanly to raster — never a vector style pointed at nothing.
+  await page.route('**/basemap/samoa.pmtiles', (route) =>
+    route.fulfill({ status: 404, contentType: 'text/plain', body: 'not here' }));
+  await open(page);
+  const info = await page.evaluate(() => ({
+    basemap: window.__apia.basemap,
+    sources: Object.keys(window.__apia.map.getStyle().sources),
+  }));
+  expect(info.basemap).not.toBe('vector');
+  expect(info.sources).toContain('basemap');       // raster source
+  expect(info.sources).not.toContain('protomaps'); // no phantom vector source
 });
 
 test('the map actually draws pins — worker loads and the source renders', async ({ page }) => {
