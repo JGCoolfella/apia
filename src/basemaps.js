@@ -102,6 +102,7 @@ function vectorStyle(pmtilesUrl, dark) {
     sand: c('#f2e9cf', '#26251a'),
     water: c('#a9d6e8', '#0e2233'),
     waterway: c('#9fcfe3', '#123047'),
+    reef: c('#c3e4dd', '#12303a'),
     building: c('#e8e2d6', '#1d2c38'),
     minor: c('#ffffff', '#243543'),
     minorCase: c('#e0dbd2', '#1a2833'),
@@ -135,33 +136,60 @@ function vectorStyle(pmtilesUrl, dark) {
       L('earth', 'earth', { type: 'fill', paint: { 'fill-color': palette.earth } }),
       L('landuse-green', 'landuse', {
         type: 'fill',
-        filter: ['in', ['get', 'pmap:kind'], ['literal', ['park', 'nature_reserve', 'garden', 'golf_course', 'cemetery', 'grass', 'pitch']]],
+        filter: ['in', ['get', 'kind'], ['literal', ['park', 'nature_reserve', 'garden', 'golf_course', 'cemetery', 'grass', 'pitch', 'recreation_ground']]],
         paint: { 'fill-color': palette.park },
       }),
       L('landuse-forest', 'landuse', {
         type: 'fill',
-        filter: ['in', ['get', 'pmap:kind'], ['literal', ['forest', 'wood', 'scrub']]],
-        paint: { 'fill-color': palette.forest },
-      }),
-      L('natural-green', 'natural', {
-        type: 'fill',
-        filter: ['in', ['get', 'pmap:kind'], ['literal', ['wood', 'scrub', 'grassland']]],
+        filter: ['in', ['get', 'kind'], ['literal', ['forest', 'wood', 'scrub']]],
         paint: { 'fill-color': palette.forest },
       }),
       L('landuse-sand', 'landuse', {
         type: 'fill',
-        filter: ['in', ['get', 'pmap:kind'], ['literal', ['beach', 'sand']]],
+        filter: ['in', ['get', 'kind'], ['literal', ['beach', 'sand']]],
         paint: { 'fill-color': palette.sand },
       }),
-      L('natural-sand', 'natural', {
+      L('landuse-wetland', 'landuse', {
         type: 'fill',
-        filter: ['in', ['get', 'pmap:kind'], ['literal', ['beach', 'sand']]],
-        paint: { 'fill-color': palette.sand },
+        filter: ['==', ['get', 'kind'], 'wetland'],
+        paint: { 'fill-color': palette.reef, 'fill-opacity': 0.5 },
       }),
-      L('water', 'water', { type: 'fill', paint: { 'fill-color': palette.water } }),
+      L('aeroways', 'roads', {
+        type: 'line',
+        filter: ['==', ['get', 'kind'], 'aeroway'],
+        paint: {
+          'line-color': palette.mediumCase,
+          'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 10, 1.5, 14, 8, 17, 40],
+        },
+      }),
+      // The Mulifanua–Salelologa crossing, straight from the data: the one
+      // line on this map that is genuinely a route, drawn as one.
+      L('ferry-routes', 'roads', {
+        type: 'line',
+        filter: ['==', ['get', 'kind'], 'ferry'],
+        paint: { 'line-color': palette.waterLabel, 'line-width': 1.6, 'line-dasharray': [3, 3] },
+      }),
+      // Water needs discrimination, not a blanket fill: reef flats are not open
+      // sea, and narrow stream polygons are tagged min_zoom 14 by the tileset -
+      // painted early they smear into valley-wide wedges.
+      L('water', 'water', {
+        type: 'fill',
+        filter: ['!', ['in', ['get', 'kind'], ['literal', ['reef', 'stream', 'drain', 'ditch']]]],
+        paint: { 'fill-color': palette.water },
+      }),
+      L('water-reef', 'water', {
+        type: 'fill',
+        filter: ['==', ['get', 'kind'], 'reef'],
+        paint: { 'fill-color': palette.reef, 'fill-opacity': 0.55 },
+      }),
+      L('water-streams', 'water', {
+        type: 'fill', minzoom: 14,
+        filter: ['in', ['get', 'kind'], ['literal', ['stream', 'drain', 'ditch']]],
+        paint: { 'fill-color': palette.waterway },
+      }),
       L('waterways', 'physical_line', {
         type: 'line',
-        filter: ['in', ['get', 'pmap:kind'], ['literal', ['river', 'stream']]],
+        filter: ['in', ['get', 'kind'], ['literal', ['river', 'stream']]],
         paint: {
           'line-color': palette.waterway,
           'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 10, 0.5, 16, 2.5],
@@ -175,37 +203,37 @@ function vectorStyle(pmtilesUrl, dark) {
       // Roads: casing under fill, three classes.
       L('roads-minor-case', 'roads', {
         type: 'line', minzoom: 12,
-        filter: ['in', ['get', 'pmap:kind'], ['literal', ['minor_road', 'other', 'path']]],
+        filter: ['in', ['get', 'kind'], ['literal', ['minor_road', 'other', 'path']]],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': palette.minorCase, 'line-gap-width': roadWidth(0.7), 'line-width': 1 },
       }),
       L('roads-minor', 'roads', {
         type: 'line',
-        filter: ['in', ['get', 'pmap:kind'], ['literal', ['minor_road', 'other', 'path']]],
+        filter: ['in', ['get', 'kind'], ['literal', ['minor_road', 'other', 'path']]],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': palette.minor, 'line-width': roadWidth(0.7) },
       }),
       L('roads-medium-case', 'roads', {
         type: 'line', minzoom: 10,
-        filter: ['==', ['get', 'pmap:kind'], 'medium_road'],
+        filter: ['==', ['get', 'kind'], 'medium_road'],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': palette.mediumCase, 'line-gap-width': roadWidth(1.1), 'line-width': 1 },
       }),
       L('roads-medium', 'roads', {
         type: 'line',
-        filter: ['==', ['get', 'pmap:kind'], 'medium_road'],
+        filter: ['==', ['get', 'kind'], 'medium_road'],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': palette.medium, 'line-width': roadWidth(1.1) },
       }),
       L('roads-major-case', 'roads', {
         type: 'line',
-        filter: ['in', ['get', 'pmap:kind'], ['literal', ['major_road', 'highway']]],
+        filter: ['in', ['get', 'kind'], ['literal', ['major_road', 'highway']]],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': palette.majorCase, 'line-gap-width': roadWidth(1.6), 'line-width': 1 },
       }),
       L('roads-major', 'roads', {
         type: 'line',
-        filter: ['in', ['get', 'pmap:kind'], ['literal', ['major_road', 'highway']]],
+        filter: ['in', ['get', 'kind'], ['literal', ['major_road', 'highway']]],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': palette.major, 'line-width': roadWidth(1.6) },
       }),
@@ -228,7 +256,7 @@ function vectorStyle(pmtilesUrl, dark) {
       }),
       L('water-labels', 'physical_point', {
         type: 'symbol',
-        filter: ['in', ['get', 'pmap:kind'], ['literal', ['sea', 'ocean', 'bay', 'water']]],
+        filter: ['in', ['get', 'kind'], ['literal', ['sea', 'ocean', 'bay', 'water']]],
         layout: {
           'text-field': ['get', 'name'],
           'text-font': ['Noto Sans Italic'],
@@ -244,8 +272,8 @@ function vectorStyle(pmtilesUrl, dark) {
           'text-font': ['Noto Sans Medium'],
           'text-size': [
             'interpolate', ['linear'], ['zoom'],
-            7, ['match', ['get', 'pmap:kind'], 'locality', 12, 10],
-            14, ['match', ['get', 'pmap:kind'], 'locality', 18, 13],
+            7, ['match', ['get', 'kind'], 'locality', 12, 10],
+            14, ['match', ['get', 'kind'], 'locality', 18, 13],
           ],
           'text-max-width': 8,
         },
