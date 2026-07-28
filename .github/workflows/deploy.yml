@@ -67,15 +67,22 @@ jobs:
         # Refuses to publish a stale, malformed or wrong-pipeline snapshot.
         run: npm run check
 
+      # The `secrets` context is not allowed in `if:` expressions — a workflow
+      # that tries is INVALID, and GitHub surfaces that as a failed phantom run
+      # on every push. Decide the auth mode in a step, where secrets are legal.
+      - name: Choose credential mode
+        id: mode
+        run: echo "oidc=${{ secrets.AWS_ROLE_ARN != '' }}" >> "$GITHUB_OUTPUT"
+
       - name: Configure AWS credentials (OIDC)
-        if: vars.USE_OIDC == 'true' || secrets.AWS_ROLE_ARN != ''
+        if: steps.mode.outputs.oidc == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ inputs.region }}
 
       - name: Configure AWS credentials (access keys)
-        if: secrets.AWS_ROLE_ARN == ''
+        if: steps.mode.outputs.oidc != 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}

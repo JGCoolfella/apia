@@ -82,4 +82,12 @@ jobs:
           git commit -m "basemap: refresh Samoa vector extract
 
           $(du -h public/basemap/samoa.pmtiles | cut -f1) from the Protomaps planet build."
-          git push
+          # Two workflows (data refresh, basemap fetch) can land on the same
+          # branch from the same push, so a plain `git push` races. Rebase our
+          # commit onto whatever arrived meanwhile and retry.
+          for attempt in 1 2 3; do
+            git push && break
+            echo "Push rejected (attempt $attempt) - rebasing onto the remote and retrying."
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            sleep $((attempt * 3))
+          done

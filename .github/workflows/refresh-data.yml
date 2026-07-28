@@ -87,4 +87,12 @@ jobs:
           git commit -m "data: refresh Apia OpenStreetMap snapshot
 
           ${COUNT} places, OSM data as of ${OSM_TS}."
-          git push
+          # Two workflows (data refresh, basemap fetch) can land on the same
+          # branch from the same push, so a plain `git push` races. Rebase our
+          # commit onto whatever arrived meanwhile and retry.
+          for attempt in 1 2 3; do
+            git push && break
+            echo "Push rejected (attempt $attempt) - rebasing onto the remote and retrying."
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            sleep $((attempt * 3))
+          done
