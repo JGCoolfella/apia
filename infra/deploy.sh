@@ -164,18 +164,20 @@ URL="$(outputs SiteURL)"
 
 step "Uploading to s3://$BUCKET"
 
-# 1. Immutable, content-hashed assets and the basemap archive.
+# 1. Immutable, content-hashed assets.
 aws s3 sync "$DIST" "s3://$BUCKET" \
   --region "$REGION" --delete \
-  --exclude '*' --include 'assets/*' --include 'basemap/*' \
+  --exclude '*' --include 'assets/*' \
   --cache-control 'public,max-age=31536000,immutable'
 
-# .pmtiles must be served as an opaque binary so CloudFront honours range requests.
+# The basemap archive keeps a constant filename (basemap/samoa.pmtiles), so it
+# must NOT be immutable — a refreshed archive has to reach clients within a day.
+# Served as an opaque binary so CloudFront honours range requests.
 if [ -d "$DIST/basemap" ]; then
-  aws s3 cp "s3://$BUCKET/basemap/" "s3://$BUCKET/basemap/" \
-    --region "$REGION" --recursive --metadata-directive REPLACE \
+  aws s3 sync "$DIST/basemap" "s3://$BUCKET/basemap" \
+    --region "$REGION" --delete \
     --content-type 'application/octet-stream' \
-    --cache-control 'public,max-age=31536000,immutable' >/dev/null
+    --cache-control 'public,max-age=86400' >/dev/null
 fi
 
 # 2. Everything else: short-lived so a redeploy is picked up promptly.

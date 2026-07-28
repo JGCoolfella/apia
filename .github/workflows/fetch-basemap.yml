@@ -1,0 +1,85 @@
+name: Fetch vector basemap
+
+# Cuts a Samoa extract from the Protomaps daily planet build and commits it as
+# public/basemap/samoa.pmtiles. The app probes for this file at boot and
+# upgrades itself from raster tiles to the self-hosted vector basemap when it
+# is present — sharper cartography, a true dark mode, and no dependence on
+# tile.openstreetmap.org (whose usage policy discourages exactly that).
+#
+# Runs monthly (the basemap is roads and coastline — it moves slowly; the POI
+# layer refreshes weekly on its own), on demand, and bootstraps itself on push
+# when no archive exists yet.
+
+on:
+  schedule:
+    - cron: '30 14 3 * *'   # 3rd of the month, 14:30 UTC
+  workflow_dispatch:
+  push:
+    branches: ['**']
+    paths:
+      - '.github/workflows/fetch-basemap.yml'
+      - 'scripts/fetch-basemap.sh'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fetch-basemap-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide whether to fetch
+        id: decide
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [ -f public/basemap/samoa.pmtiles ]; then
+            echo "Archive already present; push runs only bootstrap it."
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install the pmtiles CLI
+        if: steps.decide.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo protomaps/go-pmtiles --pattern '*Linux_x86_64.tar.gz' --output pmtiles.tar.gz
+          tar -xzf pmtiles.tar.gz pmtiles
+          sudo mv pmtiles /usr/local/bin/
+          pmtiles version || true
+
+      - name: Extract Samoa from the Protomaps planet build
+        if: steps.decide.outputs.run == 'true'
+        run: bash scripts/fetch-basemap.sh
+
+      - name: Sanity-check the archive
+        if: steps.decide.outputs.run == 'true'
+        run: |
+          FILE=public/basemap/samoa.pmtiles
+          SIZE=$(stat -c%s "$FILE")
+          echo "Archive size: $((SIZE / 1024 / 1024)) MB"
+          # An implausibly small archive means the extract failed; an enormous
+          # one does not belong in git.
+          [ "$SIZE" -gt 300000 ]    || { echo "Archive suspiciously small"; exit 1; }
+          [ "$SIZE" -lt 47000000 ]  || { echo "Archive too large to commit"; exit 1; }
+          pmtiles show "$FILE" | head -20
+
+      - name: Commit if changed
+        if: steps.decide.outputs.run == 'true'
+        run: |
+          if [ -z "$(git status --porcelain -- public/basemap/)" ]; then
+            echo "Basemap unchanged."
+            exit 0
+          fi
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add public/basemap/samoa.pmtiles
+          git commit -m "basemap: refresh Samoa vector extract
+
+          $(du -h public/basemap/samoa.pmtiles | cut -f1) from the Protomaps planet build."
+          git push

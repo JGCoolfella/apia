@@ -1,0 +1,5 @@
+# The map is one page; everything else is data it loads.
+User-agent: *
+Allow: /
+Disallow: /data/
+Sitemap: https://apia.greendealer.co.nz/sitemap.xml

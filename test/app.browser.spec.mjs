@@ -49,9 +49,12 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function open(page) {
-  // Arrive as a returning visitor: the one-time intro flyover has been seen,
-  // so the viewport is still and assertions are not racing an animation.
-  await page.addInitScript(() => localStorage.setItem('apia-map:seen-intro', '1'));
+  // Arrive as a returning visitor: the one-time intro flyover and welcome card
+  // have been seen, so the viewport is still and nothing overlays the map.
+  await page.addInitScript(() => {
+    localStorage.setItem('apia-map:seen-intro', '1');
+    localStorage.setItem('apia-map:welcomed', '1');
+  });
   await page.goto('/');
   await expect(page.locator('#loading')).toBeHidden({ timeout: 20_000 });
 }
@@ -495,6 +498,57 @@ test('keyboard help opens with ?', async ({ page }) => {
 test('data age is shown in the sidebar', async ({ page }) => {
   await open(page);
   await expect(page.locator('#dataAge')).toContainText(/data:/);
+});
+
+test('the measuring tape measures, freezes, and clears', async ({ page }) => {
+  await open(page);
+  const box = await page.locator('#map').boundingBox();
+
+  await page.locator('#measureBtn').click();
+  await expect(page.locator('#measureChip')).toContainText('Click the map');
+
+  await page.mouse.click(box.x + box.width * 0.35, box.y + box.height * 0.5);
+  await page.mouse.click(box.x + box.width * 0.65, box.y + box.height * 0.5);
+  // Two points a third of a viewport apart must yield a real distance.
+  await expect(page.locator('#measureChip strong')).toContainText(/(m|km)$/);
+  const reading = await page.locator('#measureChip strong').textContent();
+  expect(parseFloat(reading)).toBeGreaterThan(0);
+
+  // While measuring, clicking a pin must not open a detail panel.
+  await expect(page.locator('#detail')).toBeHidden();
+
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#measureChip')).toBeHidden();
+  await expect(page.locator('#measureBtn')).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('the welcome card appears once and can start a walk', async ({ page }) => {
+  // A genuinely first visit: no flags set.
+  await page.goto('/');
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 20_000 });
+
+  const card = page.locator('#welcome');
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('Tālofa');
+  await expect(card).toContainText(/OpenStreetMap/);
+
+  await card.locator('[data-w="walk"]').click();
+  await expect(card).toBeHidden();
+  await expect(page.locator('#walkPanel')).toBeVisible();   // straight into the walk
+
+  // Never again in this browser.
+  await page.reload();
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 20_000 });
+  await expect(page.locator('#welcome')).toBeHidden();
+});
+
+test('without the vector archive the map falls back to raster tiles', async ({ page }) => {
+  // The dev checkout carries no samoa.pmtiles, so the probe must fail cleanly
+  // and leave the raster default in place.
+  await open(page);
+  const styleSources = await page.evaluate(() => Object.keys(window.__apia.map.getStyle().sources));
+  expect(styleSources).toContain('basemap');       // raster source
+  expect(styleSources).not.toContain('protomaps'); // no phantom vector source
 });
 
 test('the map actually draws pins — worker loads and the source renders', async ({ page }) => {

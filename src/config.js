@@ -18,15 +18,16 @@ export const DEFAULT_CENTER = [-171.769, -13.841];
 export const DEFAULT_ZOOM = 13.5;
 
 /**
- * Extraction bounding box: the north coast of Upolu from Mulifanua / Faleolo in
- * the west to Falefa in the east, inland past Vailima and Mount Vaea. Chosen so
- * that both airports and the Savai'i ferry terminal fall inside the dataset.
+ * Extraction bounding box: the whole of Samoa — Upolu, Savai'i, Manono and
+ * Apolima. Apia remains the map's home and focus, but a visitor's trip does not
+ * stop at the town limits: the ferry crosses to Savai'i, and a map that ends at
+ * the wharf strands them. Both islands, ferry to ferry.
  */
 export const BBOX = {
-  south: -13.95,
-  west: -172.1,
-  north: -13.7,
-  east: -171.6,
+  south: -14.10,
+  west: -172.85,
+  north: -13.40,
+  east: -171.35,
 };
 
 /** Camera clamp: the same area with a little breathing room. */
@@ -47,8 +48,9 @@ export const IANA_TZ = 'Pacific/Apia'; // UTC+13 year-round; Samoa abolished DST
  *   2  collapse OSM node/way duplicates of the same place
  *   3  restrict that merge to node+way pairs, with a wider radius for villages
  *   4  reject Overpass mirrors lagging behind the planet
+ *   5  expand coverage from the Apia coast to the whole of Samoa
  */
-export const PIPELINE_VERSION = 4;
+export const PIPELINE_VERSION = 5;
 
 /**
  * Overpass mirrors, tried in order. The build script and the in-browser "refresh

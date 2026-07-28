@@ -7,7 +7,7 @@
 //
 // Bump CACHE_VERSION on every deploy that changes the shell.
 
-const CACHE_VERSION = 'apia-v5';
+const CACHE_VERSION = 'apia-v6';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const TILE_CACHE = `${CACHE_VERSION}-tiles`;
 const MAX_TILES = 1200;
@@ -44,7 +44,6 @@ self.addEventListener('activate', (event) => {
 
 const isTile = (url) =>
   /\/\d+\/\d+\/\d+\.(png|jpg|webp|pbf)/.test(url.pathname) ||
-  url.pathname.endsWith('.pmtiles') ||
   url.hostname.includes('fonts.openmaptiles.org');
 
 self.addEventListener('fetch', (event) => {
@@ -52,6 +51,12 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
 
   const url = new URL(req.url);
+
+  // The pmtiles archive is read with byte-range requests, and the Cache API
+  // ignores the Range header on match: caching one 206 slice would serve that
+  // same slice for EVERY later range and silently corrupt the vector map.
+  // Range requests go straight to the network, always.
+  if (req.headers.has('range') || url.pathname.endsWith('.pmtiles')) return;
 
   // Never cache Overpass responses - a manual refresh must always hit the network.
   if (url.pathname.includes('/api/interpreter')) return;

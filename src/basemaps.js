@@ -1,28 +1,51 @@
 // Basemap style definitions.
 //
-// Two paths, both pure OpenStreetMap:
+// Three options, all pure OpenStreetMap data:
 //
-//   "streets" / "topo"  - raster tiles fetched from a public tile service. Zero
-//                         setup, ideal for local development and low-traffic
-//                         personal use.
-//   "vector"            - a self-hosted Protomaps .pmtiles file (see
-//                         scripts/fetch-basemap.sh). No API key, no third-party
-//                         tile server, no usage limits, and it works offline.
-//                         This is the right choice for anything public.
-//
-// The OSM Foundation's tile usage policy (https://operations.osmfoundation.org/policies/tiles/)
-// asks that apps not become heavy users of tile.openstreetmap.org. If this map
-// is going to get real traffic, switch the default to "vector".
+//   "vector"            - a self-hosted Protomaps .pmtiles archive served from
+//                         this site's own CDN. No API key, no third-party tile
+//                         server, no usage limits, range-request cheap, and the
+//                         only option with a TRUE dark style rather than dimmed
+//                         raster tiles. The default whenever the archive has
+//                         been built (CI fetches it; see fetch-basemap.yml).
+//   "streets" / "topo"  - public raster tile services. Zero setup, and the
+//                         fallback when no archive is present. The OSMF tile
+//                         policy (operations.osmfoundation.org/policies/tiles/)
+//                         asks apps not to lean on tile.openstreetmap.org, which
+//                         is exactly why the vector archive exists.
 
 const OSM_ATTRIBUTION =
   '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">&copy; OpenStreetMap contributors</a>';
 
 export const PMTILES_URL = import.meta.env?.VITE_PMTILES_URL || 'basemap/samoa.pmtiles';
 
+/**
+ * Does the self-hosted archive actually exist on this deployment? A cheap
+ * range probe (2 bytes) answers without downloading anything meaningful.
+ * SPA rewrites can answer 200 with HTML for missing files, so the content
+ * type is checked too.
+ */
+export async function probeVectorBasemap(fetchImpl = fetch) {
+  try {
+    const res = await fetchImpl(PMTILES_URL, { headers: { Range: 'bytes=0-1' } });
+    if (!res.ok && res.status !== 206) return false;
+    const type = res.headers.get('content-type') || '';
+    return !type.includes('text/html');
+  } catch {
+    return false;
+  }
+}
+
 export const BASEMAPS = {
+  vector: {
+    label: 'Samoa (vector)',
+    hint: 'Self-hosted, sharpest rendering, true dark mode, works offline',
+    kind: 'vector',
+    build: (dark) => vectorStyle(PMTILES_URL, !!dark),
+  },
   streets: {
     label: 'Streets',
-    hint: 'OpenStreetMap standard tiles',
+    hint: 'OpenStreetMap standard raster tiles',
     kind: 'raster',
     build: () => rasterStyle(
       ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
@@ -32,7 +55,7 @@ export const BASEMAPS = {
   },
   topo: {
     label: 'Terrain',
-    hint: 'OpenTopoMap - contours and relief',
+    hint: 'OpenTopoMap — contours and relief',
     kind: 'raster',
     build: () => rasterStyle(
       [
@@ -44,21 +67,13 @@ export const BASEMAPS = {
       `${OSM_ATTRIBUTION} | <a href="https://opentopomap.org/" target="_blank" rel="noopener">OpenTopoMap</a> (CC-BY-SA)`,
     ),
   },
-  vector: {
-    label: 'Vector',
-    hint: 'Self-hosted Protomaps basemap - works offline',
-    kind: 'vector',
-    build: () => vectorStyle(PMTILES_URL),
-  },
 };
 
-export const DEFAULT_BASEMAP = 'streets';
+export const DEFAULT_BASEMAP = 'streets'; // boot upgrades to 'vector' when the archive probes present
 
 function rasterStyle(tiles, maxzoom, attribution) {
   return {
     version: 8,
-    // Glyphs are only needed by the app's own label layers; they come from the
-    // same public MapLibre demo font server used by the default style.
     glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
     sources: {
       basemap: { type: 'raster', tiles, tileSize: 256, maxzoom, attribution },
@@ -71,13 +86,40 @@ function rasterStyle(tiles, maxzoom, attribution) {
 }
 
 /**
- * A compact Protomaps-flavoured vector style. Deliberately minimal: land, water,
- * green space, roads, buildings and place labels. The point is a calm backdrop
- * that lets the POI pins carry the map.
+ * The house cartography: a calm lagoon-and-sand basemap in light mode and a
+ * genuine night style in dark mode, designed to sit underneath this app's pins
+ * rather than compete with them. Colours are chosen as pairs so the two themes
+ * read as the same map at different hours, not two different products.
  */
-function vectorStyle(pmtilesUrl) {
+function vectorStyle(pmtilesUrl, dark) {
+  // [light, dark]
+  const c = (l, d) => (dark ? d : l);
+  const palette = {
+    background: c('#dfeef2', '#0b1420'),
+    earth: c('#f7f4ee', '#101c26'),
+    park: c('#d6ecca', '#16281e'),
+    forest: c('#cfe6c2', '#142419'),
+    sand: c('#f2e9cf', '#26251a'),
+    water: c('#a9d6e8', '#0e2233'),
+    waterway: c('#9fcfe3', '#123047'),
+    building: c('#e8e2d6', '#1d2c38'),
+    minor: c('#ffffff', '#243543'),
+    minorCase: c('#e0dbd2', '#1a2833'),
+    medium: c('#ffffff', '#2b3f4f'),
+    mediumCase: c('#d8d2c8', '#1a2833'),
+    major: c('#fdf0c0', '#3d4c55'),
+    majorCase: c('#e6d49a', '#1a2833'),
+    boundary: c('#b9b2a6', '#3a4a56'),
+    labelText: c('#3d4238', '#c8d4dc'),
+    labelHalo: c('#ffffff', '#0b1420'),
+    roadLabel: c('#5c574e', '#9fb0bc'),
+    waterLabel: c('#4b7f99', '#5f8ba3'),
+  };
+
   const src = 'protomaps';
-  const L = (id, extra) => ({ id, source: src, 'source-layer': extra['source-layer'], ...extra });
+  const L = (id, layer, extra) => ({ id, source: src, 'source-layer': layer, ...extra });
+  const roadWidth = (base) => ['interpolate', ['exponential', 1.6], ['zoom'], 7, base * 0.4, 12, base, 16, base * 4.2, 20, base * 14];
+
   return {
     version: 8,
     glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
@@ -89,77 +131,125 @@ function vectorStyle(pmtilesUrl) {
       },
     },
     layers: [
-      { id: 'background', type: 'background', paint: { 'background-color': '#f6f4f0' } },
-      L('earth', { 'source-layer': 'earth', type: 'fill', paint: { 'fill-color': '#f6f4f0' } }),
-      L('landuse', {
-        'source-layer': 'landuse',
+      { id: 'background', type: 'background', paint: { 'background-color': palette.background } },
+      L('earth', 'earth', { type: 'fill', paint: { 'fill-color': palette.earth } }),
+      L('landuse-green', 'landuse', {
         type: 'fill',
+        filter: ['in', ['get', 'pmap:kind'], ['literal', ['park', 'nature_reserve', 'garden', 'golf_course', 'cemetery', 'grass', 'pitch']]],
+        paint: { 'fill-color': palette.park },
+      }),
+      L('landuse-forest', 'landuse', {
+        type: 'fill',
+        filter: ['in', ['get', 'pmap:kind'], ['literal', ['forest', 'wood', 'scrub']]],
+        paint: { 'fill-color': palette.forest },
+      }),
+      L('natural-green', 'natural', {
+        type: 'fill',
+        filter: ['in', ['get', 'pmap:kind'], ['literal', ['wood', 'scrub', 'grassland']]],
+        paint: { 'fill-color': palette.forest },
+      }),
+      L('landuse-sand', 'landuse', {
+        type: 'fill',
+        filter: ['in', ['get', 'pmap:kind'], ['literal', ['beach', 'sand']]],
+        paint: { 'fill-color': palette.sand },
+      }),
+      L('natural-sand', 'natural', {
+        type: 'fill',
+        filter: ['in', ['get', 'pmap:kind'], ['literal', ['beach', 'sand']]],
+        paint: { 'fill-color': palette.sand },
+      }),
+      L('water', 'water', { type: 'fill', paint: { 'fill-color': palette.water } }),
+      L('waterways', 'physical_line', {
+        type: 'line',
+        filter: ['in', ['get', 'pmap:kind'], ['literal', ['river', 'stream']]],
         paint: {
-          'fill-color': [
-            'match', ['get', 'pmap:kind'],
-            'park', '#d9ecd0', 'forest', '#d3e7c8', 'nature_reserve', '#d9ecd0',
-            'beach', '#f5ecd0', 'pitch', '#dfeccf', 'cemetery', '#e2e6dc',
-            'hospital', '#f3e0e0', 'school', '#e8e6f2', 'aerodrome', '#e9e9ee',
-            'transparent',
-          ],
+          'line-color': palette.waterway,
+          'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 10, 0.5, 16, 2.5],
         },
       }),
-      L('water', { 'source-layer': 'water', type: 'fill', paint: { 'fill-color': '#a8d5e6' } }),
-      L('roads-minor', {
-        'source-layer': 'roads',
+      L('buildings', 'buildings', {
+        type: 'fill', minzoom: 14,
+        paint: { 'fill-color': palette.building, 'fill-opacity': 0.85 },
+      }),
+
+      // Roads: casing under fill, three classes.
+      L('roads-minor-case', 'roads', {
+        type: 'line', minzoom: 12,
+        filter: ['in', ['get', 'pmap:kind'], ['literal', ['minor_road', 'other', 'path']]],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': palette.minorCase, 'line-gap-width': roadWidth(0.7), 'line-width': 1 },
+      }),
+      L('roads-minor', 'roads', {
         type: 'line',
         filter: ['in', ['get', 'pmap:kind'], ['literal', ['minor_road', 'other', 'path']]],
-        paint: {
-          'line-color': '#ffffff',
-          'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 11, 0.4, 16, 3, 20, 12],
-        },
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': palette.minor, 'line-width': roadWidth(0.7) },
       }),
-      L('roads-medium', {
-        'source-layer': 'roads',
+      L('roads-medium-case', 'roads', {
+        type: 'line', minzoom: 10,
+        filter: ['==', ['get', 'pmap:kind'], 'medium_road'],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': palette.mediumCase, 'line-gap-width': roadWidth(1.1), 'line-width': 1 },
+      }),
+      L('roads-medium', 'roads', {
         type: 'line',
         filter: ['==', ['get', 'pmap:kind'], 'medium_road'],
-        paint: {
-          'line-color': '#ffffff',
-          'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 9, 0.6, 16, 5, 20, 18],
-        },
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': palette.medium, 'line-width': roadWidth(1.1) },
       }),
-      L('roads-major', {
-        'source-layer': 'roads',
+      L('roads-major-case', 'roads', {
         type: 'line',
         filter: ['in', ['get', 'pmap:kind'], ['literal', ['major_road', 'highway']]],
-        paint: {
-          'line-color': '#fdf2c8',
-          'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 7, 0.8, 16, 7, 20, 24],
-        },
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': palette.majorCase, 'line-gap-width': roadWidth(1.6), 'line-width': 1 },
       }),
-      L('buildings', {
-        'source-layer': 'buildings',
-        type: 'fill',
-        minzoom: 14,
-        paint: { 'fill-color': '#e6e2da', 'fill-opacity': 0.9 },
+      L('roads-major', 'roads', {
+        type: 'line',
+        filter: ['in', ['get', 'pmap:kind'], ['literal', ['major_road', 'highway']]],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': palette.major, 'line-width': roadWidth(1.6) },
       }),
-      L('roads-labels', {
-        'source-layer': 'roads',
-        type: 'symbol',
-        minzoom: 15,
+
+      L('boundaries', 'boundaries', {
+        type: 'line',
+        paint: { 'line-color': palette.boundary, 'line-width': 1, 'line-dasharray': [3, 2] },
+      }),
+
+      // Labels: roads at high zoom, water bodies, then places on top.
+      L('road-labels', 'roads', {
+        type: 'symbol', minzoom: 14,
         layout: {
           'symbol-placement': 'line',
           'text-field': ['get', 'name'],
           'text-font': ['Noto Sans Regular'],
           'text-size': 11,
         },
-        paint: { 'text-color': '#5b5750', 'text-halo-color': '#ffffff', 'text-halo-width': 1.4 },
+        paint: { 'text-color': palette.roadLabel, 'text-halo-color': palette.labelHalo, 'text-halo-width': 1.4 },
       }),
-      L('place-labels', {
-        'source-layer': 'places',
+      L('water-labels', 'physical_point', {
+        type: 'symbol',
+        filter: ['in', ['get', 'pmap:kind'], ['literal', ['sea', 'ocean', 'bay', 'water']]],
+        layout: {
+          'text-field': ['get', 'name'],
+          'text-font': ['Noto Sans Italic'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 8, 11, 14, 14],
+          'text-letter-spacing': 0.08,
+        },
+        paint: { 'text-color': palette.waterLabel, 'text-halo-color': palette.labelHalo, 'text-halo-width': 1.2 },
+      }),
+      L('place-labels', 'places', {
         type: 'symbol',
         layout: {
           'text-field': ['get', 'name'],
           'text-font': ['Noto Sans Medium'],
-          'text-size': ['interpolate', ['linear'], ['zoom'], 8, 11, 14, 15],
+          'text-size': [
+            'interpolate', ['linear'], ['zoom'],
+            7, ['match', ['get', 'pmap:kind'], 'locality', 12, 10],
+            14, ['match', ['get', 'pmap:kind'], 'locality', 18, 13],
+          ],
           'text-max-width': 8,
         },
-        paint: { 'text-color': '#3d3a35', 'text-halo-color': '#ffffff', 'text-halo-width': 1.8 },
+        paint: { 'text-color': palette.labelText, 'text-halo-color': palette.labelHalo, 'text-halo-width': 1.8 },
       }),
     ],
   };

@@ -7,8 +7,10 @@ playwright-report/
 blob-report/
 .playwright/
 
-# Basemap extracts are large binaries; regenerate with `npm run fetch:basemap`.
-public/basemap/*.pmtiles
+# The Samoa basemap archive IS committed (public/basemap/samoa.pmtiles): CI
+# builds it (fetch-basemap.yml) and the deploy syncs it to the CDN. Only local
+# scratch extracts are ignored.
+public/basemap/*.pmtiles.tmp
 
 # Local scratch
 dbg*.mjs

@@ -21,7 +21,7 @@ setWorkerUrl(maplibreWorkerUrl);
 import './styles.css';
 import { APIA_CENTER, DEFAULT_CENTER, DEFAULT_ZOOM, MAX_BOUNDS, IANA_TZ, STALE_SNAPSHOT_DAYS } from './config.js';
 import { CATEGORIES, CATEGORY_ORDER } from './classify.js';
-import { BASEMAPS, DEFAULT_BASEMAP } from './basemaps.js';
+import { BASEMAPS, DEFAULT_BASEMAP, probeVectorBasemap } from './basemaps.js';
 import { loadDataset, refreshFromOSM, clearCache } from './data.js';
 import { buildIndex, search, matchSegments } from './search.js';
 import { CATEGORY_ICONS, svgIcon } from './icons.js';
@@ -50,6 +50,8 @@ const state = {
   selectedId: null,
   userLocation: null,
   basemap: localStorage.getItem('apia-map:basemap') || DEFAULT_BASEMAP,
+  darkMap: window.matchMedia('(prefers-color-scheme: dark)').matches,
+  measure: null,            // { pts: [[lng,lat],...], done: boolean } while measuring
   dimDark: localStorage.getItem('apia-map:dim-dark') !== 'off',
   searchHighlight: -1,
   searchMatches: [],
@@ -116,6 +118,13 @@ async function boot() {
   state.walks = (state.curated.walks || [])
     .map((w) => resolveWalk(w, featureByHighlight))
     .filter(Boolean);
+
+  // Prefer the self-hosted vector basemap whenever this deployment carries the
+  // archive — unless the user has explicitly picked something else. A cheap
+  // 2-byte probe decides; a checkout without the archive falls back to raster.
+  if (!localStorage.getItem('apia-map:basemap') && await probeVectorBasemap()) {
+    state.basemap = 'vector';
+  }
 
   setLoading('Drawing the map…');
   initMap(initial);
@@ -184,11 +193,11 @@ function hideLoading() {
 function initMap(initial) {
   const map = new MapLibreMap({
     container: 'map',
-    style: BASEMAPS[state.basemap]?.build() ?? BASEMAPS[DEFAULT_BASEMAP].build(),
+    style: (BASEMAPS[state.basemap] ?? BASEMAPS[DEFAULT_BASEMAP]).build(state.darkMap),
     center: initial.center || DEFAULT_CENTER,
     zoom: initial.zoom ?? DEFAULT_ZOOM,
     maxBounds: MAX_BOUNDS,
-    minZoom: 9,
+    minZoom: 8,   // both islands fit in one view
     maxZoom: 19,
     attributionControl: false,
   });
@@ -214,13 +223,21 @@ function initMap(initial) {
   map.getCanvas().setAttribute('tabindex', '0');
 
   // A 3D tilt toggle, which on a harbour town with hills behind it genuinely
-  // helps you read the terrain rather than being decoration.
+  // helps you read the terrain rather than being decoration — and a measuring
+  // tape, because "how far is that really?" is the question a paper map
+  // answers with a thumb and this one can answer properly.
   map.addControl({
     onAdd() {
       const el = document.createElement('div');
       el.className = 'maplibregl-ctrl maplibregl-ctrl-group';
-      el.innerHTML = '<button type="button" id="pitchBtn" title="Tilt the map (3D)" aria-pressed="false">3D</button>';
-      el.querySelector('button').addEventListener('click', togglePitch);
+      el.innerHTML = `
+        <button type="button" id="pitchBtn" title="Tilt the map (3D)" aria-pressed="false">3D</button>
+        <button type="button" id="measureBtn" title="Measure distances (click points, double-click to finish, Esc to clear)" aria-pressed="false">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20.7 6.4 17.6 3.3a1 1 0 0 0-1.4 0L3.3 16.2a1 1 0 0 0 0 1.4l3.1 3.1a1 1 0 0 0 1.4 0L20.7 7.8a1 1 0 0 0 0-1.4zM7.1 18.6 5.4 16.9l1.4-1.4 1.1 1.1 1.05-1.06-1.1-1.1 1.4-1.4 1.1 1.1L11.4 13l-1.1-1.1 1.4-1.4 1.1 1.1 1.06-1.05-1.1-1.1 1.4-1.4 1.1 1.1 1.4-1.4 1.7 1.7z"/></svg>
+          <span class="sr-only">Measure distances</span>
+        </button>`;
+      el.querySelector('#pitchBtn').addEventListener('click', togglePitch);
+      el.querySelector('#measureBtn').addEventListener('click', toggleMeasure);
       return el;
     },
     onRemove() {},
@@ -242,6 +259,7 @@ function initMap(initial) {
       if (w) startWalk(w.id, { step: initial.step ?? 0, fly: !initial.center });
     }
     if (shouldPlayIntro(initial)) introFlyover();
+    maybeShowWelcome(initial);
   });
 
   // Belt and braces: nothing should be able to leave the loading screen up.
@@ -249,6 +267,7 @@ function initMap(initial) {
 
   map.on('moveend', () => { renderList(); writeHash(); });
   map.on('click', 'poi', (e) => {
+    if (state.measure && !state.measure.done) return; // the tape owns clicks
     const id = e.features?.[0]?.properties?.id;
     if (id) selectFeature(id, { fly: false });
   });
@@ -260,9 +279,21 @@ function initMap(initial) {
       .catch(() => map.easeTo({ center: f.geometry.coordinates, zoom: map.getZoom() + 2 }));
   });
   map.on('click', (e) => {
+    if (state.measure && !state.measure.done) {
+      state.measure.pts.push([e.lngLat.lng, e.lngLat.lat]);
+      renderMeasure();
+      return;
+    }
     // A click on empty map closes the detail panel.
     const hits = map.queryRenderedFeatures(e.point, { layers: ['poi', 'clusters'] });
     if (hits.length === 0) closeDetail();
+  });
+  map.on('dblclick', (e) => {
+    if (state.measure && !state.measure.done) {
+      e.preventDefault();
+      state.measure.done = true;   // freeze the tape; Esc or the button clears it
+      renderMeasure();
+    }
   });
 
   for (const layer of ['poi', 'clusters', 'walk-stops']) {
@@ -357,6 +388,53 @@ function showNearby(coords) {
   });
 }
 
+const WELCOME_KEY = 'apia-map:welcomed';
+
+/**
+ * A one-time orientation card. Features nobody finds are features that do not
+ * exist — the walks, the open-now filter and right-click-for-nearby are only
+ * real if a first-time visitor learns they are there. Shown once, dismissed
+ * forever, and suppressed on deep links (that visitor already knows the app).
+ */
+function maybeShowWelcome(initial) {
+  if (initial.center || initial.sel || initial.walk) return;
+  try {
+    if (localStorage.getItem(WELCOME_KEY)) return;
+  } catch { return; }
+
+  const card = document.createElement('div');
+  card.id = 'welcome';
+  card.className = 'welcome';
+  card.setAttribute('role', 'dialog');
+  card.setAttribute('aria-label', 'Welcome');
+  card.innerHTML = `
+    <h2>Tālofa — welcome to Apia</h2>
+    <p>Every place on this map is real, live OpenStreetMap data for the whole of
+       Sāmoa — ${state.all.length.toLocaleString()} places, refreshed weekly.</p>
+    <ul>
+      <li>${svgIcon(CATEGORY_ICONS.sights)} <b>Guided walks</b> — the boot icon up top strings the best of Apia together, step by step</li>
+      <li>${svgIcon(CATEGORY_ICONS.food)} <b>Open now</b> — filter to places whose hours say they're open this minute</li>
+      <li>${svgIcon(CATEGORY_ICONS.places)} <b>Right-click anywhere</b> (long-press on a phone) to see what's nearest that point</li>
+    </ul>
+    <div class="welcome-actions">
+      <button class="btn primary" data-w="explore">Explore the map</button>
+      <button class="btn" data-w="walk">Start the waterfront walk</button>
+    </div>
+    <small>Works offline once loaded · free &amp; open data</small>`;
+  $('#map').appendChild(card);
+
+  const dismiss = (thenWalk) => {
+    try { localStorage.setItem(WELCOME_KEY, String(Date.now())); } catch { /* ok */ }
+    card.remove();
+    if (thenWalk) {
+      const w = state.walks[0];
+      if (w) startWalk(w.id);
+    }
+  };
+  card.querySelector('[data-w="explore"]').addEventListener('click', () => dismiss(false));
+  card.querySelector('[data-w="walk"]').addEventListener('click', () => dismiss(true));
+}
+
 const INTRO_KEY = 'apia-map:seen-intro';
 
 /**
@@ -418,6 +496,61 @@ function introFlyover() {
  * In dark mode the standard OSM raster tiles glare. Dim and desaturate the
  * raster layer itself (not the canvas, which would also recolour the pins).
  */
+// ---------------------------------------------------------------------------
+// Measuring tape
+// ---------------------------------------------------------------------------
+
+function toggleMeasure() {
+  if (state.measure) { endMeasure(); return; }
+  state.measure = { pts: [], done: false };
+  $('#measureBtn')?.setAttribute('aria-pressed', 'true');
+  $('#measureBtn')?.classList.add('on');
+  state.map.getCanvas().style.cursor = 'crosshair';
+  renderMeasure();
+  toast('Measuring: click points on the map, double-click to finish, Esc to clear.');
+}
+
+function endMeasure() {
+  state.measure = null;
+  $('#measureBtn')?.setAttribute('aria-pressed', 'false');
+  $('#measureBtn')?.classList.remove('on');
+  state.map.getCanvas().style.cursor = '';
+  state.map.getSource('measure')?.setData(EMPTY_FC);
+  const chip = $('#measureChip');
+  if (chip) chip.hidden = true;
+}
+
+function renderMeasure() {
+  const m = state.measure;
+  const src = state.map.getSource('measure');
+  if (!m || !src) return;
+
+  const features = m.pts.map((p, i) => ({
+    type: 'Feature', geometry: { type: 'Point', coordinates: p }, properties: { i },
+  }));
+  if (m.pts.length >= 2) {
+    features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: m.pts }, properties: {} });
+  }
+  src.setData({ type: 'FeatureCollection', features });
+
+  let total = 0;
+  for (let i = 1; i < m.pts.length; i++) total += distanceMeters(m.pts[i - 1], m.pts[i]);
+
+  let chip = $('#measureChip');
+  if (!chip) {
+    chip = document.createElement('div');
+    chip.id = 'measureChip';
+    chip.className = 'measure-chip';
+    $('#map').appendChild(chip);
+  }
+  chip.hidden = false;
+  chip.innerHTML = m.pts.length === 0
+    ? 'Click the map to start measuring'
+    : `<strong>${formatDistance(total)}</strong>
+       <span>${escapeHTML(walkingTime(total))}</span>
+       <span class="mc-hint">${m.done ? 'Esc or the ruler button clears' : 'double-click to finish'}</span>`;
+}
+
 function togglePitch() {
   state.pitched = !state.pitched;
   const btn = $('#pitchBtn');
@@ -550,6 +683,28 @@ function addLayers(map) {
     paint: { 'text-color': '#ffffff' },
   });
 
+  map.addSource('measure', { type: 'geojson', data: EMPTY_FC });
+  map.addLayer({
+    id: 'measure-line',
+    type: 'line',
+    source: 'measure',
+    filter: ['==', ['geometry-type'], 'LineString'],
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': '#e0007f', 'line-width': 2.5, 'line-dasharray': [1.5, 1.5] },
+  });
+  map.addLayer({
+    id: 'measure-pts',
+    type: 'circle',
+    source: 'measure',
+    filter: ['==', ['geometry-type'], 'Point'],
+    paint: {
+      'circle-radius': 5,
+      'circle-color': '#ffffff',
+      'circle-stroke-color': '#e0007f',
+      'circle-stroke-width': 2,
+    },
+  });
+
   map.addSource('walk-line', { type: 'geojson', data: EMPTY_FC });
   map.addSource('walk-stops', { type: 'geojson', data: EMPTY_FC });
 
@@ -635,12 +790,14 @@ function addLayers(map) {
   });
 }
 
-function switchBasemap(key) {
+function switchBasemap(key, { persist = true } = {}) {
   if (!BASEMAPS[key]) return;
   state.basemap = key;
-  localStorage.setItem('apia-map:basemap', key);
+  // Only a deliberate pick is remembered. A theme-change rebuild passes
+  // persist:false so the automatic vector default stays automatic.
+  if (persist) localStorage.setItem('apia-map:basemap', key);
   const map = state.map;
-  map.setStyle(BASEMAPS[key].build());
+  map.setStyle(BASEMAPS[key].build(state.darkMap));
   map.once('styledata', () => {
     addPinImages(map);
     addLayers(map);
@@ -973,7 +1130,13 @@ function showDetail(id) {
 
   if (state.userLocation) {
     const d = distanceMeters(state.userLocation, coords);
-    facts.push(fact('🚶', `${formatDistance(d)} away<span class="sub">${escapeHTML(walkingTime(d))}</span>`));
+    const b = bearingDeg(state.userLocation, coords);
+    // A live compass needle: which way, from where you are standing, is this
+    // place? North-referenced — hold the phone flat with the map's north up.
+    facts.push(fact(
+      `<span class="bearing-arrow" style="transform:rotate(${Math.round(b) - 90}deg)" title="Direction from your position (map north up)">➤</span>`,
+      `${formatDistance(d)} away, ${compassPoint(b)}<span class="sub">${escapeHTML(walkingTime(d))} · bearing ${Math.round(b)}°</span>`,
+    ));
   }
 
   const dirs = directionsLinks(coords, p.name)
@@ -1160,6 +1323,21 @@ function fact(icon, valueHTML) {
   return `<div class="fact"><span class="k" aria-hidden="true">${icon}</span><span class="v">${valueHTML}</span></div>`;
 }
 
+/** Initial great-circle bearing from a to b, degrees clockwise from north. */
+function bearingDeg([lng1, lat1], [lng2, lat2]) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLng = toRad(lng2 - lng1);
+  const y = Math.sin(dLng) * Math.cos(toRad(lat2));
+  const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2))
+    - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLng);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function compassPoint(deg) {
+  const points = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+  return points[Math.round(deg / 45) % 8];
+}
+
 function prettyUrl(u) {
   try { return new URL(u).host.replace(/^www\./, ''); } catch { return u; }
 }
@@ -1235,6 +1413,14 @@ function wireUI() {
     renderList();
   });
 
+  // Theme changes rebuild the vector style: it has a real night palette, so a
+  // phone sliding into dark mode at sunset takes the map with it.
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+    state.darkMap = e.matches;
+    if (BASEMAPS[state.basemap]?.kind === 'vector') switchBasemap(state.basemap, { persist: false });
+    else applyDarkDim();
+  });
+
   // Connection status: the map keeps working offline (cached tiles + local
   // data), but the user deserves to know which world they are in.
   const netDot = $('#netDot');
@@ -1275,7 +1461,8 @@ function wireUI() {
       if (e.key === 'ArrowLeft' || e.key === 'p') { goToWalkStep(state.walkStep - 1); return; }
     }
     if (e.key === 'Escape' && !document.querySelector('dialog[open]')) {
-      if (state.selectedId) closeDetail();
+      if (state.measure) endMeasure();
+      else if (state.selectedId) closeDetail();
       else if (state.walk) endWalk();
     }
   });
