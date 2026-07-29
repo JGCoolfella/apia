@@ -17,6 +17,24 @@
 const OSM_ATTRIBUTION =
   '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">&copy; OpenStreetMap contributors</a>';
 
+/**
+ * Real elevation: the open Mapzen/AWS terrain tiles (SRTM and friends, terrarium
+ * encoding), hosted as an AWS Open Data set. No key, no quota. This is what
+ * makes 3D honest — Mount Vaea, the Upolu ridge and Savai'i's 1,858 m shield
+ * volcano at their measured heights, not decorative extrusion.
+ */
+export const TERRAIN_SOURCE = {
+  type: 'raster-dem',
+  tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+  encoding: 'terrarium',
+  tileSize: 256,
+  maxzoom: 15,
+  attribution: 'Terrain: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">Mapzen/AWS Open Data (SRTM)</a>',
+};
+
+const ESRI_IMAGERY_ATTRIBUTION =
+  'Imagery: <a href="https://www.esri.com" target="_blank" rel="noopener">Esri</a>, Maxar, Earthstar Geographics, and the GIS User Community';
+
 export const PMTILES_URL = import.meta.env?.VITE_PMTILES_URL || 'basemap/samoa.pmtiles';
 
 /**
@@ -53,6 +71,12 @@ export const BASEMAPS = {
       OSM_ATTRIBUTION,
     ),
   },
+  satellite: {
+    label: 'Satellite',
+    hint: 'Esri world imagery — with place labels when the vector archive is present',
+    kind: 'raster',
+    build: (dark, { hasVector = false } = {}) => satelliteStyle(hasVector),
+  },
   topo: {
     label: 'Terrain',
     hint: 'OpenTopoMap — contours and relief',
@@ -68,6 +92,69 @@ export const BASEMAPS = {
     ),
   },
 };
+
+/**
+ * Satellite imagery, hybrid when possible: Esri's world imagery underneath and,
+ * when the self-hosted vector archive exists, our own place labels and the ferry
+ * route drawn over it so the imagery is navigable rather than just pretty.
+ * Note the Esri tile scheme is {z}/{y}/{x}.
+ */
+function satelliteStyle(hasVector) {
+  const style = {
+    version: 8,
+    glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
+    sources: {
+      satellite: {
+        type: 'raster',
+        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: `${ESRI_IMAGERY_ATTRIBUTION} | ${OSM_ATTRIBUTION}`,
+      },
+      dem: { ...TERRAIN_SOURCE },
+    },
+    layers: [
+      { id: 'background', type: 'background', paint: { 'background-color': '#0a1a24' } },
+      { id: 'satellite', type: 'raster', source: 'satellite', paint: { 'raster-fade-duration': 200 } },
+    ],
+  };
+
+  if (hasVector) {
+    style.sources.protomaps = {
+      type: 'vector',
+      url: `pmtiles://${PMTILES_URL}`,
+      attribution: '',
+    };
+    style.layers.push(
+      {
+        id: 'sat-ferry',
+        type: 'line',
+        source: 'protomaps',
+        'source-layer': 'roads',
+        filter: ['==', ['get', 'kind'], 'ferry'],
+        paint: { 'line-color': '#9fd8ea', 'line-width': 1.6, 'line-dasharray': [3, 3] },
+      },
+      {
+        id: 'sat-place-labels',
+        type: 'symbol',
+        source: 'protomaps',
+        'source-layer': 'places',
+        layout: {
+          'text-field': ['get', 'name'],
+          'text-font': ['Noto Sans Medium'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 7, 11, 14, 15],
+          'text-max-width': 8,
+        },
+        paint: {
+          'text-color': '#ffffff',
+          'text-halo-color': 'rgba(6,14,20,0.85)',
+          'text-halo-width': 1.8,
+        },
+      },
+    );
+  }
+  return style;
+}
 
 export const DEFAULT_BASEMAP = 'streets'; // boot upgrades to 'vector' when the archive probes present
 
@@ -130,6 +217,7 @@ function vectorStyle(pmtilesUrl, dark) {
         url: `pmtiles://${pmtilesUrl}`,
         attribution: `${OSM_ATTRIBUTION} | <a href="https://protomaps.com" target="_blank" rel="noopener">Protomaps</a>`,
       },
+      dem: { ...TERRAIN_SOURCE },
     },
     layers: [
       { id: 'background', type: 'background', paint: { 'background-color': palette.background } },
@@ -154,6 +242,20 @@ function vectorStyle(pmtilesUrl, dark) {
         filter: ['==', ['get', 'kind'], 'wetland'],
         paint: { 'fill-color': palette.reef, 'fill-opacity': 0.5 },
       }),
+      // Real relief from the same DEM that powers the 3D toggle. Kept subtle:
+      // it should read as texture on the volcanic ridges, not as a shaded-relief
+      // poster fighting the road network.
+      {
+        id: 'hillshade',
+        type: 'hillshade',
+        source: 'dem',
+        paint: {
+          'hillshade-exaggeration': dark ? 0.35 : 0.25,
+          'hillshade-shadow-color': c('#5f6c5e', '#02070c'),
+          'hillshade-highlight-color': c('#ffffff', '#33506b'),
+          'hillshade-accent-color': c('#7a8a76', '#0a1520'),
+        },
+      },
       L('aeroways', 'roads', {
         type: 'line',
         filter: ['==', ['get', 'kind'], 'aeroway'],

@@ -21,7 +21,7 @@ setWorkerUrl(maplibreWorkerUrl);
 import './styles.css';
 import { APIA_CENTER, DEFAULT_CENTER, DEFAULT_ZOOM, MAX_BOUNDS, IANA_TZ, STALE_SNAPSHOT_DAYS } from './config.js';
 import { CATEGORIES, CATEGORY_ORDER } from './classify.js';
-import { BASEMAPS, DEFAULT_BASEMAP, probeVectorBasemap } from './basemaps.js';
+import { BASEMAPS, DEFAULT_BASEMAP, probeVectorBasemap, TERRAIN_SOURCE } from './basemaps.js';
 import { loadDataset, refreshFromOSM, clearCache } from './data.js';
 import { buildIndex, search, matchSegments } from './search.js';
 import { CATEGORY_ICONS, svgIcon } from './icons.js';
@@ -65,6 +65,7 @@ const state = {
   photoShots: [],           // nearby photographs currently dotted on the map
   lightbox: null,           // { items, index }
   pitched: false,
+  vectorAvailable: false,   // did the pmtiles archive answer the boot probe?
 };
 
 // Introspection hook, deliberately present in production too: it holds nothing
@@ -124,7 +125,9 @@ async function boot() {
   // Prefer the self-hosted vector basemap whenever this deployment carries the
   // archive — unless the user has explicitly picked something else. A cheap
   // 2-byte probe decides; a checkout without the archive falls back to raster.
-  if (!localStorage.getItem('apia-map:basemap') && await probeVectorBasemap()) {
+  // The result also decides whether Satellite gets its hybrid label overlay.
+  state.vectorAvailable = await probeVectorBasemap();
+  if (!localStorage.getItem('apia-map:basemap') && state.vectorAvailable) {
     state.basemap = 'vector';
   }
 
@@ -192,10 +195,26 @@ function hideLoading() {
 // Map
 // ---------------------------------------------------------------------------
 
+function buildStyle(key) {
+  return (BASEMAPS[key] ?? BASEMAPS[DEFAULT_BASEMAP])
+    .build(state.darkMap, { hasVector: state.vectorAvailable });
+}
+
+/**
+ * Every style switch rebuilds the style from scratch, so the elevation source
+ * and the terrain setting both have to be re-established afterwards. This is
+ * the single place that knows how: guarantee a `dem` source exists, then
+ * reapply 3D if it was on.
+ */
+function ensureTerrain(map) {
+  if (!map.getSource('dem')) map.addSource('dem', { ...TERRAIN_SOURCE });
+  if (state.pitched) map.setTerrain({ source: 'dem', exaggeration: 1.35 });
+}
+
 function initMap(initial) {
   const map = new MapLibreMap({
     container: 'map',
-    style: (BASEMAPS[state.basemap] ?? BASEMAPS[DEFAULT_BASEMAP]).build(state.darkMap),
+    style: buildStyle(state.basemap),
     center: initial.center || DEFAULT_CENTER,
     zoom: initial.zoom ?? DEFAULT_ZOOM,
     maxBounds: MAX_BOUNDS,
@@ -252,6 +271,7 @@ function initMap(initial) {
   map.once('style.load', () => {
     addPinImages(map);
     addLayers(map);
+    ensureTerrain(map);
     applyFilter();
     applyDarkDim();
     hideLoading();
@@ -566,8 +586,17 @@ function togglePitch() {
   const btn = $('#pitchBtn');
   btn?.setAttribute('aria-pressed', String(state.pitched));
   btn?.classList.toggle('on', state.pitched);
-  state.map.easeTo({
-    pitch: state.pitched ? 55 : 0,
+  const map = state.map;
+  if (state.pitched) {
+    // True 3D: real SRTM elevation under the map, not just a camera tilt.
+    // Mount Vaea rises behind the town at its measured height.
+    ensureTerrain(map);
+    map.setTerrain({ source: 'dem', exaggeration: 1.35 });
+  } else {
+    map.setTerrain(null);
+  }
+  map.easeTo({
+    pitch: state.pitched ? 60 : 0,
     duration: prefersReducedMotion() ? 0 : 700,
   });
 }
@@ -821,10 +850,11 @@ function switchBasemap(key, { persist = true } = {}) {
   // persist:false so the automatic vector default stays automatic.
   if (persist) localStorage.setItem('apia-map:basemap', key);
   const map = state.map;
-  map.setStyle(BASEMAPS[key].build(state.darkMap));
+  map.setStyle(buildStyle(key));
   map.once('styledata', () => {
     addPinImages(map);
     addLayers(map);
+    ensureTerrain(map);
     applyFilter();
     applyDarkDim();
     if (state.selectedId) highlightOnMap(state.selectedId);
@@ -1762,9 +1792,10 @@ function openGuide() {
 }
 
 function openLayers() {
+  const iconFor = { vector: '🧩', streets: '🗺️', satellite: '🛰️', topo: '⛰️' };
   const opts = Object.entries(BASEMAPS).map(([key, b]) => `
     <button class="opt" data-basemap="${key}" aria-pressed="${state.basemap === key}">
-      <span aria-hidden="true">${b.kind === 'vector' ? '🧩' : '🗺️'}</span>
+      <span aria-hidden="true">${iconFor[key] || '🗺️'}</span>
       <span><strong>${escapeHTML(b.label)}</strong><span>${escapeHTML(b.hint)}</span></span>
     </button>`).join('');
 
@@ -1780,6 +1811,9 @@ function openLayers() {
       but not for a busy public site. Vector uses a Protomaps <code>.pmtiles</code> file you host
       yourself — no API key, no rate limit, and it keeps working offline. See
       <code>scripts/fetch-basemap.sh</code> in the repository.
+      Satellite imagery is Esri World Imagery (Esri, Maxar, Earthstar Geographics).
+      The 3D button drapes any basemap over real SRTM elevation
+      (Mapzen/AWS Open Data terrain tiles).
     </p>`);
 
   dlg.querySelectorAll('[data-basemap]').forEach((btn) => {

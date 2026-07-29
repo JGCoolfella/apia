@@ -54,6 +54,18 @@ test.describe('CloudFront response headers policy', () => {
     }
   });
 
+  test('allows the satellite imagery and terrain tile hosts', () => {
+    // MapLibre fetches raster and DEM tiles with fetch(), so connect-src is the
+    // directive that actually gates them — but both go in img-src too so a
+    // future loader change cannot silently break 3D in production only.
+    const connect = csp.match(/connect-src[^;]+/)[0];
+    const img = csp.match(/img-src[^;]+/)[0];
+    for (const host of ['https://server.arcgisonline.com', 'https://s3.amazonaws.com']) {
+      expect(connect, `connect-src missing ${host}`).toContain(host);
+      expect(img, `img-src missing ${host}`).toContain(host);
+    }
+  });
+
   test('allows the whole media pipeline: Wikidata, Wikipedia and Commons', () => {
     // Three fetch targets (entity claims, article summaries, Commons geosearch)
     // and three image origins — the Commons thumbnail redirects to

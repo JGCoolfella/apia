@@ -38,7 +38,8 @@ test.beforeEach(async ({ page }) => {
     }));
 
   // Nothing external: tiles become a blank pixel, glyphs and Overpass are refused.
-  await page.route(/tile\.openstreetmap\.org|tile\.opentopomap\.org/, (route) =>
+  // The DEM and satellite hosts are included so 3D tests stay hermetic too.
+  await page.route(/tile\.openstreetmap\.org|tile\.opentopomap\.org|elevation-tiles-prod|server\.arcgisonline\.com/, (route) =>
     route.fulfill({ contentType: 'image/png', body: BLANK_PNG }));
   await page.route(/fonts\.openmaptiles\.org/, (route) => route.abort());
   await page.route(/api\/interpreter/, (route) => route.abort());
@@ -174,13 +175,17 @@ test('the data panel is honest about where the map comes from', async ({ page })
   await expect(dlg).toContainText('nothing is hand-placed');
 });
 
-test('the basemap panel offers the self-hosted vector option', async ({ page }) => {
+test('the basemap panel offers vector, streets, satellite and terrain', async ({ page }) => {
   await open(page);
   await page.locator('#layersBtn').click();
   const dlg = page.locator('#layersDlg');
   await expect(dlg).toBeVisible();
-  await expect(dlg.locator('[data-basemap]')).toHaveCount(3);
+  await expect(dlg.locator('[data-basemap]')).toHaveCount(4);
+  await expect(dlg.locator('[data-basemap="satellite"]')).toContainText('Satellite');
   await expect(dlg).toContainText('pmtiles');
+  // The imagery and elevation providers are credited where the choice is made.
+  await expect(dlg).toContainText('Esri');
+  await expect(dlg).toContainText('SRTM');
 });
 
 test('works on a phone-sized viewport', async ({ page }) => {
@@ -449,13 +454,32 @@ test('list rows show a thumbnail for places that have one', async ({ page }) => 
   await expect(page.locator('#results .result.has-thumb img').first()).toBeVisible({ timeout: 15_000 });
 });
 
-test('the 3D tilt control pitches the map and back', async ({ page }) => {
+test('the 3D control raises real terrain, not just a camera tilt', async ({ page }) => {
   await open(page);
   expect(await page.evaluate(() => window.__apia.map.getPitch())).toBe(0);
+  expect(await page.evaluate(() => window.__apia.map.getTerrain())).toBeNull();
+
   await page.locator('#pitchBtn').click();
-  await expect.poll(() => page.evaluate(() => window.__apia.map.getPitch())).toBeGreaterThan(30);
+  await expect.poll(() => page.evaluate(() => window.__apia.map.getPitch())).toBeGreaterThan(40);
+  const terrain = await page.evaluate(() => window.__apia.map.getTerrain());
+  expect(terrain?.source).toBe('dem');
+  expect(terrain?.exaggeration).toBeGreaterThan(1);
+
   await page.locator('#pitchBtn').click();
   await expect.poll(() => page.evaluate(() => window.__apia.map.getPitch())).toBe(0);
+  expect(await page.evaluate(() => window.__apia.map.getTerrain())).toBeNull();
+});
+
+test('3D terrain survives a basemap switch', async ({ page }) => {
+  await open(page);
+  await page.locator('#pitchBtn').click();
+  await expect.poll(() => page.evaluate(() => window.__apia.map.getTerrain()?.source)).toBe('dem');
+
+  await page.locator('#layersBtn').click();
+  await page.locator('#layersDlg [data-basemap="satellite"]').click();
+  // The style rebuild drops terrain; the app must put it back.
+  await expect.poll(() => page.evaluate(() => window.__apia.map.getTerrain()?.source), { timeout: 10_000 }).toBe('dem');
+  expect(await page.evaluate(() => window.__apia.map.getPitch())).toBeGreaterThan(40);
 });
 
 test.describe('intro flyover', () => {

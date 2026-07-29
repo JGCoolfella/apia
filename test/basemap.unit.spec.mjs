@@ -1,7 +1,7 @@
 // The vector style is hand-written cartography; these tests keep it honest.
 
 import { test, expect } from '@playwright/test';
-import { BASEMAPS, probeVectorBasemap } from '../src/basemaps.js';
+import { BASEMAPS, probeVectorBasemap, TERRAIN_SOURCE } from '../src/basemaps.js';
 import { BBOX } from '../src/config.js';
 
 const light = BASEMAPS.vector.build(false);
@@ -39,6 +39,57 @@ test.describe('vector style', () => {
 
   test('attribution credits OpenStreetMap', () => {
     expect(light.sources.protomaps.attribution).toContain('OpenStreetMap');
+  });
+
+  test('carries real relief: a DEM source and a hillshade layer in both themes', () => {
+    for (const style of [light, dark]) {
+      expect(style.sources.dem.type).toBe('raster-dem');
+      expect(style.sources.dem.encoding).toBe('terrarium');
+      const hs = style.layers.find((l) => l.id === 'hillshade');
+      expect(hs.type).toBe('hillshade');
+      expect(hs.source).toBe('dem');
+      // Relief is texture under the roads, never over them.
+      const ids = style.layers.map((l) => l.id);
+      expect(ids.indexOf('hillshade')).toBeLessThan(ids.indexOf('roads-major'));
+    }
+  });
+});
+
+test.describe('terrain source', () => {
+  test('is the open AWS terrarium DEM at its documented parameters', () => {
+    expect(TERRAIN_SOURCE.type).toBe('raster-dem');
+    expect(TERRAIN_SOURCE.encoding).toBe('terrarium');
+    expect(TERRAIN_SOURCE.tiles[0]).toBe('https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png');
+    // The dataset tops out at z15; asking deeper returns 404s that MapLibre
+    // treats as holes in the terrain.
+    expect(TERRAIN_SOURCE.maxzoom).toBe(15);
+    expect(TERRAIN_SOURCE.attribution).toContain('Mapzen');
+  });
+});
+
+test.describe('satellite style', () => {
+  test('uses the Esri {z}/{y}/{x} scheme and credits the imagery providers', () => {
+    const style = BASEMAPS.satellite.build(false, { hasVector: false });
+    const sat = style.sources.satellite;
+    // Esri's REST tile path is row-before-column; {z}/{x}/{y} here fetches
+    // real tiles of the wrong place, which renders and looks plausible.
+    expect(sat.tiles[0]).toContain('/tile/{z}/{y}/{x}');
+    expect(sat.attribution).toContain('Esri');
+    expect(sat.attribution).toContain('Maxar');
+    expect(sat.attribution).toContain('OpenStreetMap');
+    expect(style.sources.dem.encoding).toBe('terrarium');
+  });
+
+  test('is plain imagery without the archive, hybrid with it', () => {
+    const plain = BASEMAPS.satellite.build(false, { hasVector: false });
+    expect(plain.layers.find((l) => l.id === 'sat-place-labels')).toBeUndefined();
+    expect(JSON.stringify(plain.sources)).not.toContain('pmtiles');
+
+    const hybrid = BASEMAPS.satellite.build(false, { hasVector: true });
+    const labels = hybrid.layers.find((l) => l.id === 'sat-place-labels');
+    expect(labels.type).toBe('symbol');
+    expect(hybrid.layers.find((l) => l.id === 'sat-ferry').type).toBe('line');
+    expect(hybrid.sources.protomaps.url).toContain('pmtiles://');
   });
 });
 

@@ -188,9 +188,11 @@ Resources:
               child-src 'self' blob:;
               style-src 'self' 'unsafe-inline';
               img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.opentopomap.org
+              https://server.arcgisonline.com https://s3.amazonaws.com
               https://commons.wikimedia.org https://upload.wikimedia.org https://*.wikipedia.org;
               font-src 'self' data:;
               connect-src 'self' blob: https://tile.openstreetmap.org https://*.tile.opentopomap.org
+              https://server.arcgisonline.com https://s3.amazonaws.com
               https://fonts.openmaptiles.org https://overpass-api.de https://overpass.kumi.systems
               https://overpass.private.coffee https://overpass.osm.jp https://maps.mail.ru
               https://www.wikidata.org https://commons.wikimedia.org https://*.wikipedia.org;
