@@ -626,7 +626,10 @@ test('the map actually draws pins — worker loads and the source renders', asyn
         return m.queryRenderedFeatures({ layers: ['poi', 'clusters'] }).length;
       } catch { return 0; }
     };
-    for (let i = 0; i < 100 && count() === 0; i++) {
+    // Both conditions must hold at once: under parallel test load the source
+    // can still be re-clustering for a beat after the first pins paint.
+    const ok = () => { try { return count() > 0 && m.isSourceLoaded('poi'); } catch { return false; } };
+    for (let i = 0; i < 150 && !ok(); i++) {
       await new Promise((r) => setTimeout(r, 100));
     }
     return { features: count(), sourceLoaded: m.isSourceLoaded('poi') };

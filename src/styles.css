@@ -15,15 +15,17 @@
   --line: #e6e2db;
   --line-strong: #cfc9bf;
   --accent: #0a6e8a;
+  --accent-2: #0d94a8;
   --accent-fg: #ffffff;
   --accent-soft: #e3f1f5;
+  --accent-grad: linear-gradient(135deg, var(--accent), var(--accent-2));
   --danger: #d1233b;
   --ok: #12805c;
   --shadow-sm: 0 1px 2px rgb(20 33 46 / 0.06), 0 1px 3px rgb(20 33 46 / 0.10);
   --shadow-md: 0 4px 14px rgb(20 33 46 / 0.10), 0 2px 4px rgb(20 33 46 / 0.06);
   --shadow-lg: 0 18px 44px rgb(20 33 46 / 0.18);
-  --radius: 14px;
-  --radius-sm: 9px;
+  --radius: 16px;
+  --radius-sm: 10px;
   --topbar-h: 60px;
   --sidebar-w: 372px;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -40,6 +42,7 @@
     --line: #24333f;
     --line-strong: #334655;
     --accent: #47b3d4;
+    --accent-2: #3fd0c4;
     --accent-fg: #06222c;
     --accent-soft: #14323d;
     --danger: #ff6b7f;
@@ -146,14 +149,20 @@ a:hover { text-decoration-thickness: 2px; }
 
 /* The 3D tilt control, styled to sit with MapLibre's own buttons. */
 #pitchBtn {
-  font: 600 11px/1 var(--font);
+  font: 700 11px/1 var(--font);
   letter-spacing: .04em;
   color: var(--fg-muted);
 }
-#pitchBtn.on { color: var(--accent-fg); background: var(--accent); }
+#pitchBtn.on { color: var(--accent-fg); background: var(--accent-grad); }
 
-.brand { display: flex; align-items: center; gap: 8px; flex: none; }
-.brand-mark { font-size: 22px; line-height: 1; }
+.brand { display: flex; align-items: center; gap: 9px; flex: none; }
+.brand-mark {
+  font-size: 18px; line-height: 1;
+  display: grid; place-items: center;
+  width: 34px; height: 34px; border-radius: 11px;
+  background: var(--accent-grad);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 40%, transparent);
+}
 .brand-text { display: flex; flex-direction: column; line-height: 1.05; }
 .brand-text strong { font-size: 16px; letter-spacing: -0.02em; }
 .brand-text small { font-size: 11px; color: var(--fg-muted); }
@@ -161,13 +170,14 @@ a:hover { text-decoration-thickness: 2px; }
 .icon-btn {
   display: inline-grid; place-items: center;
   width: 38px; height: 38px; flex: none;
-  border: 1px solid var(--line);
-  background: var(--bg-raised);
+  border: 1px solid transparent;
+  background: transparent;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background .12s, border-color .12s, transform .06s;
 }
-.icon-btn:hover { background: var(--bg-sunk); border-color: var(--line-strong); }
+.icon-btn:hover { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.icon-btn:hover .ui-icon { color: var(--accent); }
 .icon-btn:active { transform: scale(0.96); }
 .icon-btn.ghost { border-color: transparent; background: transparent; width: 30px; height: 30px; }
 .icon-btn .i { font-size: 16px; line-height: 1; }
@@ -272,7 +282,7 @@ mark {
   background: var(--bg-sunk);
 }
 .detail-hero img {
-  display: block; width: 100%; height: 210px; object-fit: cover;
+  display: block; width: 100%; height: 228px; object-fit: cover;
   cursor: zoom-in;
   animation: photo-in .4s ease-out;
 }
@@ -436,6 +446,7 @@ mark {
 .chip[aria-pressed="true"] {
   background: color-mix(in srgb, var(--cat, var(--accent)) 10%, var(--bg-raised));
   border-color: color-mix(in srgb, var(--cat, var(--accent)) 45%, var(--line-strong));
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--cat, var(--accent)) 18%, transparent);
 }
 
 .search-quicks.recents { border-bottom: 0; padding-bottom: 2px; }
@@ -489,10 +500,9 @@ mark {
 }
 .chip .swatch { width: 9px; height: 9px; border-radius: 50%; flex: none; }
 .chip .n { color: var(--fg-faint); font-variant-numeric: tabular-nums; font-size: 11px; }
-.chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--fg); }
-.chip[aria-pressed="false"] { opacity: .55; }
+.chip[aria-pressed="false"] { opacity: .58; background: var(--bg-sunk); }
 .chip[aria-pressed="false"] .swatch { background: var(--fg-faint) !important; }
-.chip:hover { border-color: var(--accent); }
+.chip:hover { border-color: var(--accent); opacity: 1; }
 
 .list-head {
   display: flex; align-items: baseline; justify-content: space-between;
@@ -501,17 +511,32 @@ mark {
 .list-head h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--fg-muted); }
 .count { font-size: 12px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
 
-.results { list-style: none; margin: 0; padding: 0 8px 16px; overflow-y: auto; flex: 1; min-height: 0; }
+.results { list-style: none; margin: 0; padding: 2px 10px 16px; overflow-y: auto; flex: 1; min-height: 0; }
 .results::-webkit-scrollbar { width: 10px; }
 .results::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; border: 3px solid var(--bg); }
+.results li + li { margin-top: 5px; }
 
+/* Card rows: each place reads as a unit, and the hover lift ties the row to
+   the pin ring it lights up on the map. */
 .result {
   display: flex; gap: 10px; align-items: flex-start; width: 100%;
-  padding: 10px; border: 0; background: transparent; text-align: left; cursor: pointer;
-  border-radius: var(--radius-sm);
+  padding: 10px 11px; text-align: left; cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 12px;
+  transition: background .12s, border-color .12s, box-shadow .12s, transform .12s;
 }
-.result:hover { background: var(--bg-sunk); }
-.result[aria-current="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.result:hover {
+  background: var(--bg-raised);
+  border-color: var(--line);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+.result[aria-current="true"] {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 .result .res-dot { margin-top: 6px; }
 .result .res-name { white-space: normal; overflow: visible; }
 .result .res-dist { align-self: flex-start; margin-top: 4px; }
@@ -535,7 +560,16 @@ mark {
 #map { grid-area: map; position: relative; min-width: 0; background: var(--bg-sunk); }
 #map:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
 
-.maplibregl-ctrl-group { box-shadow: var(--shadow-md) !important; border-radius: var(--radius-sm) !important; }
+.maplibregl-ctrl-group {
+  box-shadow: var(--shadow-md) !important;
+  border-radius: 12px !important;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg-raised) 92%, transparent) !important;
+  backdrop-filter: blur(10px);
+}
+.maplibregl-ctrl-group button { background: transparent !important; }
+.maplibregl-ctrl-group button:hover { background: var(--accent-soft) !important; }
+.maplibregl-ctrl-group button + button { border-top: 1px solid var(--line) !important; }
 .maplibregl-ctrl-attrib {
   font-size: 11px !important;
   background: color-mix(in srgb, var(--bg-raised) 88%, transparent) !important;
@@ -577,7 +611,7 @@ mark {
   border-bottom: 1px solid var(--line);
   position: relative;
   /* Category-coloured accent along the top of the card. */
-  border-top: 3px solid var(--cat, var(--accent));
+  border-top: 4px solid var(--cat, var(--accent));
   border-top-left-radius: inherit;
   border-top-right-radius: inherit;
 }
@@ -607,8 +641,11 @@ mark {
   background: var(--bg-raised); cursor: pointer; font-size: 13px; text-decoration: none; color: var(--fg);
 }
 .btn:hover { border-color: var(--accent); background: var(--bg-sunk); }
-.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
-.btn.primary:hover { filter: brightness(1.08); background: var(--accent); }
+.btn.primary {
+  background: var(--accent-grad); color: var(--accent-fg); border-color: transparent;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.btn.primary:hover { filter: brightness(1.07); background: var(--accent-grad); }
 
 .provenance {
   border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px;

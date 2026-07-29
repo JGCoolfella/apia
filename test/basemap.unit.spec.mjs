@@ -41,6 +41,25 @@ test.describe('vector style', () => {
     expect(light.sources.protomaps.attribution).toContain('OpenStreetMap');
   });
 
+  test('extrudes buildings at street zoom with an honest default height', () => {
+    for (const style of [light, dark]) {
+      const b3d = style.layers.find((l) => l.id === 'buildings-3d');
+      expect(b3d.type).toBe('fill-extrusion');
+      expect(b3d.minzoom).toBeGreaterThanOrEqual(15);
+      // Apia's buildings rarely carry height tags; a missing height must fall
+      // back to a modest default, never to zero (invisible) or a tower.
+      const h = JSON.stringify(b3d.paint['fill-extrusion-height']);
+      expect(h).toContain('coalesce');
+      expect(h).toContain('height');
+    }
+  });
+
+  test('every theme has a sky, so 3D ends at a horizon instead of a hard edge', () => {
+    expect(light.sky['sky-color']).toBeTruthy();
+    expect(dark.sky['sky-color']).toBeTruthy();
+    expect(light.sky['sky-color']).not.toBe(dark.sky['sky-color']);
+  });
+
   test('carries real relief: a DEM source and a hillshade layer in both themes', () => {
     for (const style of [light, dark]) {
       expect(style.sources.dem.type).toBe('raster-dem');
@@ -78,6 +97,7 @@ test.describe('satellite style', () => {
     expect(sat.attribution).toContain('Maxar');
     expect(sat.attribution).toContain('OpenStreetMap');
     expect(style.sources.dem.encoding).toBe('terrarium');
+    expect(style.sky['sky-color']).toBeTruthy();
   });
 
   test('is plain imagery without the archive, hybrid with it', () => {

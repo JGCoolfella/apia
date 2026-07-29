@@ -220,12 +220,15 @@ function initMap(initial) {
     maxBounds: MAX_BOUNDS,
     minZoom: 8,   // both islands fit in one view
     maxZoom: 19,
+    // Past MapLibre's default 60° the camera can drop low enough to see the
+    // horizon and the sky above it — with real terrain that is the whole show.
+    maxPitch: 72,
     attributionControl: false,
   });
   state.map = map;
 
   map.addControl(new AttributionControl({ compact: true }), 'bottom-right');
-  map.addControl(new NavigationControl({ visualizePitch: false }), 'bottom-right');
+  map.addControl(new NavigationControl({ visualizePitch: true }), 'bottom-right');
 
   const geolocate = new GeolocateControl({
     positionOptions: { enableHighAccuracy: true },
@@ -694,14 +697,30 @@ function addLayers(map) {
     },
   });
 
+  // A soft halo under each cluster so the bubbles sit on the map rather than
+  // looking stamped onto it.
+  map.addLayer({
+    id: 'clusters-glow',
+    type: 'circle',
+    source: 'poi',
+    filter: ['has', 'point_count'],
+    paint: {
+      'circle-color': '#0b6fb8',
+      'circle-opacity': 0.16,
+      'circle-radius': ['step', ['get', 'point_count'], 21, 20, 27, 60, 33, 150, 40],
+    },
+  });
+
   map.addLayer({
     id: 'clusters',
     type: 'circle',
     source: 'poi',
     filter: ['has', 'point_count'],
     paint: {
-      'circle-color': '#0b6fb8',
-      'circle-opacity': 0.86,
+      // Denser clusters shade deeper, so the eye reads "more here" before the
+      // number does.
+      'circle-color': ['step', ['get', 'point_count'], '#1287ad', 20, '#0b6fb8', 60, '#3d55b8', 150, '#5f3db0'],
+      'circle-opacity': 0.92,
       'circle-stroke-color': '#ffffff',
       'circle-stroke-width': 2,
       'circle-radius': ['step', ['get', 'point_count'], 15, 20, 20, 60, 25, 150, 31],

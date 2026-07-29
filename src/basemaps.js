@@ -35,6 +35,29 @@ export const TERRAIN_SOURCE = {
 const ESRI_IMAGERY_ATTRIBUTION =
   'Imagery: <a href="https://www.esri.com" target="_blank" rel="noopener">Esri</a>, Maxar, Earthstar Geographics, and the GIS User Community';
 
+/**
+ * Sky and haze for the tilted view. Without this the map ends at a hard edge
+ * against the page background the moment 3D is on; with it the terrain fades
+ * into a horizon and the sky above it, which is most of what makes the tilted
+ * view read as a landscape instead of a skewed rectangle.
+ */
+function skyFor(kind) {
+  const s = {
+    day: { sky: '#76c1e6', horizon: '#dcedf6', fog: '#e9f4f9' },
+    night: { sky: '#050e18', horizon: '#27506b', fog: '#0e2233' },
+    imagery: { sky: '#06121d', horizon: '#3a6c8c', fog: '#1c3a4f' },
+  }[kind];
+  return {
+    'sky-color': s.sky,
+    'horizon-color': s.horizon,
+    'fog-color': s.fog,
+    'sky-horizon-blend': 0.6,
+    'horizon-fog-blend': 0.6,
+    'fog-ground-blend': 0.85,
+    'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 10, 1, 12, 0],
+  };
+}
+
 export const PMTILES_URL = import.meta.env?.VITE_PMTILES_URL || 'basemap/samoa.pmtiles';
 
 /**
@@ -103,6 +126,7 @@ function satelliteStyle(hasVector) {
   const style = {
     version: 8,
     glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
+    sky: skyFor('imagery'),
     sources: {
       satellite: {
         type: 'raster',
@@ -162,6 +186,7 @@ function rasterStyle(tiles, maxzoom, attribution) {
   return {
     version: 8,
     glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
+    sky: skyFor('day'),
     sources: {
       basemap: { type: 'raster', tiles, tileSize: 256, maxzoom, attribution },
     },
@@ -191,6 +216,7 @@ function vectorStyle(pmtilesUrl, dark) {
     waterway: c('#9fcfe3', '#123047'),
     reef: c('#c3e4dd', '#12303a'),
     building: c('#e8e2d6', '#1d2c38'),
+    buildingWall: c('#d9d1c1', '#26394a'),
     minor: c('#ffffff', '#243543'),
     minorCase: c('#e0dbd2', '#1a2833'),
     medium: c('#ffffff', '#2b3f4f'),
@@ -211,6 +237,7 @@ function vectorStyle(pmtilesUrl, dark) {
   return {
     version: 8,
     glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
+    sky: skyFor(dark ? 'night' : 'day'),
     sources: {
       [src]: {
         type: 'vector',
@@ -300,6 +327,18 @@ function vectorStyle(pmtilesUrl, dark) {
       L('buildings', 'buildings', {
         type: 'fill', minzoom: 14,
         paint: { 'fill-color': palette.building, 'fill-opacity': 0.85 },
+      }),
+      // At street zoom every footprint stands up. Apia's OSM buildings rarely
+      // carry a height tag, so a modest single-storey default keeps the town
+      // honest — real heights are used wherever they exist.
+      L('buildings-3d', 'buildings', {
+        type: 'fill-extrusion', minzoom: 15.5,
+        paint: {
+          'fill-extrusion-color': palette.buildingWall,
+          'fill-extrusion-height': ['to-number', ['coalesce', ['get', 'height'], 5], 5],
+          'fill-extrusion-base': ['to-number', ['coalesce', ['get', 'min_height'], 0], 0],
+          'fill-extrusion-opacity': 0.82,
+        },
       }),
 
       // Roads: casing under fill, three classes.
