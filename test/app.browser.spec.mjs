@@ -470,6 +470,23 @@ test('the 3D control raises real terrain, not just a camera tilt', async ({ page
   expect(await page.evaluate(() => window.__apia.map.getTerrain())).toBeNull();
 });
 
+test('Earth view drapes satellite over 3D terrain and returns cleanly', async ({ page }) => {
+  await open(page);
+  // One tap in: satellite basemap, real terrain, tilted towards the horizon.
+  await page.locator('#earthBtn').click();
+  await expect.poll(() => page.evaluate(() => window.__apia.basemap)).toBe('satellite');
+  await expect.poll(() => page.evaluate(() => window.__apia.map.getTerrain()?.source), { timeout: 10_000 }).toBe('dem');
+  await expect.poll(() => page.evaluate(() => window.__apia.map.getPitch())).toBeGreaterThan(45);
+  await expect(page.locator('#earthBtn')).toHaveAttribute('aria-pressed', 'true');
+
+  // One tap out: exactly the map you came from, flat, terrain off.
+  await page.locator('#earthBtn').click();
+  await expect.poll(() => page.evaluate(() => window.__apia.basemap), { timeout: 10_000 }).toBe('vector');
+  await expect.poll(() => page.evaluate(() => window.__apia.map.getTerrain())).toBeNull();
+  await expect.poll(() => page.evaluate(() => window.__apia.map.getPitch())).toBe(0);
+  await expect(page.locator('#earthBtn')).toHaveAttribute('aria-pressed', 'false');
+});
+
 test('3D terrain survives a basemap switch', async ({ page }) => {
   await open(page);
   await page.locator('#pitchBtn').click();

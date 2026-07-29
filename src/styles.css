@@ -147,13 +147,35 @@ a:hover { text-decoration-thickness: 2px; }
   .topbar { background: var(--bg-raised); }
 }
 
-/* The 3D tilt control, styled to sit with MapLibre's own buttons. */
-#pitchBtn {
-  font: 700 11px/1 var(--font);
-  letter-spacing: .04em;
-  color: var(--fg-muted);
+/* --- View switcher: Map | 3D | Earth -------------------------------------- */
+
+.view-ctrl {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  background: color-mix(in srgb, var(--bg-raised) 90%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: var(--shadow-md);
 }
-#pitchBtn.on { color: var(--accent-fg); background: var(--accent-grad); }
+.view-ctrl button {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 0; cursor: pointer;
+  background: transparent; color: var(--fg-muted);
+  font: 650 12px/1 var(--font);
+  letter-spacing: .02em;
+  padding: 7px 13px 7px 10px;
+  border-radius: 999px;
+  transition: background .14s, color .14s, box-shadow .14s;
+}
+.view-ctrl button svg { width: 15px; height: 15px; display: block; }
+.view-ctrl button:hover { color: var(--fg); background: var(--bg-sunk); }
+.view-ctrl button.on {
+  color: var(--accent-fg);
+  background: var(--accent-grad);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 40%, transparent);
+}
 
 .brand { display: flex; align-items: center; gap: 9px; flex: none; }
 .brand-mark {
@@ -284,8 +306,10 @@ mark {
 .detail-hero img {
   display: block; width: 100%; height: 228px; object-fit: cover;
   cursor: zoom-in;
-  animation: photo-in .4s ease-out;
+  /* Fade in, then drift almost imperceptibly — a photograph that breathes. */
+  animation: photo-in .4s ease-out, hero-drift 24s ease-in-out .4s infinite alternate;
 }
+@keyframes hero-drift { from { transform: scale(1); } to { transform: scale(1.055); } }
 /* A soft scrim so white overlay text stays legible on any photograph. */
 .detail-hero::after {
   content: ''; position: absolute; inset: auto 0 0 0; height: 68px;
@@ -344,13 +368,17 @@ mark {
   scroll-snap-type: x proximity;
 }
 .photo-tile {
-  flex: none; width: 116px; height: 84px; padding: 0; cursor: zoom-in;
-  border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  flex: none; width: 124px; height: 88px; padding: 0; cursor: zoom-in;
+  border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
   background: var(--bg-sunk); scroll-snap-align: start;
-  transition: transform .14s ease, border-color .14s ease;
+  transition: transform .14s ease, border-color .14s ease, box-shadow .14s ease;
 }
-.photo-tile:hover { transform: translateY(-2px); border-color: var(--accent); }
-.photo-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-tile:hover { transform: translateY(-2px); border-color: var(--accent); box-shadow: var(--shadow-md); }
+.photo-tile img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  transition: transform .35s ease;
+}
+.photo-tile:hover img { transform: scale(1.07); }
 
 /* --- Measuring tape -------------------------------------------------------- */
 
@@ -804,7 +832,8 @@ kbd {
 .loading {
   position: absolute; inset: 0; z-index: 60;
   display: grid; place-content: center; gap: 14px; justify-items: center;
-  background: var(--bg);
+  background:
+    radial-gradient(900px 560px at 50% 36%, color-mix(in srgb, var(--accent) 9%, var(--bg)), var(--bg));
   transition: opacity .3s;
 }
 .loading[hidden] { display: none; }

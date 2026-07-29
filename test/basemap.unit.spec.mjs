@@ -111,6 +111,19 @@ test.describe('satellite style', () => {
     expect(hybrid.layers.find((l) => l.id === 'sat-ferry').type).toBe('line');
     expect(hybrid.sources.protomaps.url).toContain('pmtiles://');
   });
+
+  test('the hybrid is navigable: roads ghost over the imagery with names', () => {
+    const hybrid = BASEMAPS.satellite.build(false, { hasVector: true });
+    const roads = hybrid.layers.find((l) => l.id === 'sat-roads');
+    expect(roads.type).toBe('line');
+    expect(roads.minzoom).toBeGreaterThanOrEqual(10);   // never clutter the island view
+    const roadLabels = hybrid.layers.find((l) => l.id === 'sat-road-labels');
+    expect(roadLabels.type).toBe('symbol');
+    expect(roadLabels.layout['symbol-placement']).toBe('line');
+
+    const plain = BASEMAPS.satellite.build(false, { hasVector: false });
+    expect(plain.layers.find((l) => l.id === 'sat-roads')).toBeUndefined();
+  });
 });
 
 test.describe('vector probe', () => {

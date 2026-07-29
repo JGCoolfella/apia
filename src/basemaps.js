@@ -139,7 +139,14 @@ function satelliteStyle(hasVector) {
     },
     layers: [
       { id: 'background', type: 'background', paint: { 'background-color': '#0a1a24' } },
-      { id: 'satellite', type: 'raster', source: 'satellite', paint: { 'raster-fade-duration': 200 } },
+      {
+        id: 'satellite',
+        type: 'raster',
+        source: 'satellite',
+        // A touch more colour and contrast than the source imagery, which
+        // arrives flat: the lagoon should look like the lagoon.
+        paint: { 'raster-fade-duration': 200, 'raster-saturation': 0.15, 'raster-contrast': 0.06 },
+      },
     ],
   };
 
@@ -150,6 +157,22 @@ function satelliteStyle(hasVector) {
       attribution: '',
     };
     style.layers.push(
+      // A navigable hybrid, not just pretty pixels: the road network ghosts
+      // over the imagery once you are close enough for it to matter, and
+      // carries its names at street zoom.
+      {
+        id: 'sat-roads',
+        type: 'line',
+        source: 'protomaps',
+        'source-layer': 'roads',
+        minzoom: 12,
+        filter: ['in', ['get', 'kind'], ['literal', ['highway', 'major_road', 'medium_road', 'minor_road']]],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': 'rgba(255,255,255,0.55)',
+          'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 12, 0.4, 16, 2.2, 19, 6],
+        },
+      },
       {
         id: 'sat-ferry',
         type: 'line',
@@ -157,6 +180,24 @@ function satelliteStyle(hasVector) {
         'source-layer': 'roads',
         filter: ['==', ['get', 'kind'], 'ferry'],
         paint: { 'line-color': '#9fd8ea', 'line-width': 1.6, 'line-dasharray': [3, 3] },
+      },
+      {
+        id: 'sat-road-labels',
+        type: 'symbol',
+        source: 'protomaps',
+        'source-layer': 'roads',
+        minzoom: 15,
+        layout: {
+          'symbol-placement': 'line',
+          'text-field': ['get', 'name'],
+          'text-font': ['Noto Sans Regular'],
+          'text-size': 11,
+        },
+        paint: {
+          'text-color': '#ffffff',
+          'text-halo-color': 'rgba(6,14,20,0.8)',
+          'text-halo-width': 1.5,
+        },
       },
       {
         id: 'sat-place-labels',

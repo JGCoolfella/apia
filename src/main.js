@@ -65,6 +65,7 @@ const state = {
   photoShots: [],           // nearby photographs currently dotted on the map
   lightbox: null,           // { items, index }
   pitched: false,
+  prevBasemap: null,        // what Earth view should return to
   vectorAvailable: false,   // did the pmtiles archive answer the boot probe?
 };
 
@@ -246,21 +247,42 @@ function initMap(initial) {
   map.addControl(new FullscreenControl(), 'bottom-right');
   map.getCanvas().setAttribute('tabindex', '0');
 
-  // A 3D tilt toggle, which on a harbour town with hills behind it genuinely
-  // helps you read the terrain rather than being decoration — and a measuring
-  // tape, because "how far is that really?" is the question a paper map
-  // answers with a thumb and this one can answer properly.
+  // The view switcher: flat map, 3D terrain, or the full Earth view with
+  // satellite imagery draped over real elevation. On a harbour town with a
+  // mountain behind it this is navigation, not decoration.
+  map.addControl({
+    onAdd() {
+      const el = document.createElement('div');
+      el.className = 'maplibregl-ctrl view-ctrl';
+      el.setAttribute('role', 'group');
+      el.setAttribute('aria-label', 'View mode');
+      el.innerHTML = `
+        <button type="button" id="pitchBtn" title="3D — tilt the map over real terrain" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m14 6-3.75 5 2.85 3.8-1.6 1.2C9.81 13.75 7 10 7 10l-6 8h22L14 6z"/></svg>
+          <span>3D</span>
+        </button>
+        <button type="button" id="earthBtn" title="Earth — satellite imagery over 3D terrain" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.93 6h-2.95a15.65 15.65 0 0 0-1.38-3.56A8.03 8.03 0 0 1 18.93 8zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82A14.4 14.4 0 0 1 12 4.04zM4.26 14A8.1 8.1 0 0 1 4 12c0-.69.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2s.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56A7.99 7.99 0 0 1 5.08 16zm2.95-8H5.08a7.99 7.99 0 0 1 4.33-3.56A15.65 15.65 0 0 0 8.03 8zM12 19.96a14.4 14.4 0 0 1-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2s.07-1.35.16-2h4.68c.09.65.16 1.32.16 2s-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2s-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z"/></svg>
+          <span>Earth</span>
+        </button>`;
+      el.querySelector('#pitchBtn').addEventListener('click', togglePitch);
+      el.querySelector('#earthBtn').addEventListener('click', toggleEarth);
+      return el;
+    },
+    onRemove() {},
+  }, 'top-right');
+
+  // The measuring tape, because "how far is that really?" is the question a
+  // paper map answers with a thumb and this one can answer properly.
   map.addControl({
     onAdd() {
       const el = document.createElement('div');
       el.className = 'maplibregl-ctrl maplibregl-ctrl-group';
       el.innerHTML = `
-        <button type="button" id="pitchBtn" title="Tilt the map (3D)" aria-pressed="false">3D</button>
         <button type="button" id="measureBtn" title="Measure distances (click points, double-click to finish, Esc to clear)" aria-pressed="false">
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20.7 6.4 17.6 3.3a1 1 0 0 0-1.4 0L3.3 16.2a1 1 0 0 0 0 1.4l3.1 3.1a1 1 0 0 0 1.4 0L20.7 7.8a1 1 0 0 0 0-1.4zM7.1 18.6 5.4 16.9l1.4-1.4 1.1 1.1 1.05-1.06-1.1-1.1 1.4-1.4 1.1 1.1L11.4 13l-1.1-1.1 1.4-1.4 1.1 1.1 1.06-1.05-1.1-1.1 1.4-1.4 1.1 1.1 1.4-1.4 1.7 1.7z"/></svg>
           <span class="sr-only">Measure distances</span>
         </button>`;
-      el.querySelector('#pitchBtn').addEventListener('click', togglePitch);
       el.querySelector('#measureBtn').addEventListener('click', toggleMeasure);
       return el;
     },
@@ -584,11 +606,24 @@ function renderMeasure() {
        <span class="mc-hint">${m.done ? 'Esc or the ruler button clears' : 'double-click to finish'}</span>`;
 }
 
+/** Earth view is not stored, it is a fact: satellite imagery, tilted, on terrain. */
+const earthActive = () => state.basemap === 'satellite' && state.pitched;
+
+/** One place decides which view buttons light up, however the view was reached. */
+function syncViewButtons() {
+  const earthOn = earthActive();
+  const pitchOn = state.pitched && !earthOn;
+  const set = (sel, on) => {
+    const btn = $(sel);
+    btn?.setAttribute('aria-pressed', String(on));
+    btn?.classList.toggle('on', on);
+  };
+  set('#pitchBtn', pitchOn);
+  set('#earthBtn', earthOn);
+}
+
 function togglePitch() {
   state.pitched = !state.pitched;
-  const btn = $('#pitchBtn');
-  btn?.setAttribute('aria-pressed', String(state.pitched));
-  btn?.classList.toggle('on', state.pitched);
   const map = state.map;
   if (state.pitched) {
     // True 3D: real SRTM elevation under the map, not just a camera tilt.
@@ -602,6 +637,36 @@ function togglePitch() {
     pitch: state.pitched ? 60 : 0,
     duration: prefersReducedMotion() ? 0 : 700,
   });
+  syncViewButtons();
+}
+
+/**
+ * Earth view: one tap to the Google-Earth experience — satellite imagery
+ * draped over real SRTM terrain, tilted to the horizon. Leaving it restores
+ * exactly the map you came from.
+ */
+function toggleEarth() {
+  const map = state.map;
+  if (!earthActive()) {
+    if (state.basemap !== 'satellite') {
+      state.prevBasemap = state.basemap;
+      state.pitched = true;                        // styledata handler re-drapes
+      switchBasemap('satellite', { persist: false });
+    } else {
+      state.pitched = true;
+      ensureTerrain(map);
+      map.setTerrain({ source: 'dem', exaggeration: 1.35 });
+    }
+    map.easeTo({ pitch: 62, duration: prefersReducedMotion() ? 0 : 900 });
+  } else {
+    state.pitched = false;
+    map.setTerrain(null);
+    const back = state.prevBasemap || (state.vectorAvailable ? 'vector' : DEFAULT_BASEMAP);
+    state.prevBasemap = null;
+    if (back !== state.basemap) switchBasemap(back, { persist: false });
+    map.easeTo({ pitch: 0, duration: prefersReducedMotion() ? 0 : 700 });
+  }
+  syncViewButtons();
 }
 
 function applyDarkDim() {
@@ -618,6 +683,13 @@ function applyDarkDim() {
  * HTML uses — no sprite sheet, no network request, identical artwork on the
  * map and in the UI, and none of emoji's cross-platform lottery.
  */
+/** Mix a hex colour towards white (amount 0..1) for the pin's lit top edge. */
+function lightenHex(hex, amount) {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const mix = (v) => Math.round(v + (255 - v) * amount);
+  return `rgb(${mix(r)} ${mix(g)} ${mix(b)})`;
+}
+
 function addPinImages(map) {
   const dpr = 2;
   for (const [cat, def] of Object.entries(CATEGORIES)) {
@@ -628,28 +700,53 @@ function addPinImages(map) {
     ctx.scale(dpr, dpr);
 
     const cx = w / 2, cy = 14, r = 12;
-    ctx.beginPath();
-    ctx.moveTo(cx, h - 1.5);
-    ctx.quadraticCurveTo(cx - r * 0.62, cy + r * 0.86, cx - r * 0.86, cy + r * 0.5);
-    ctx.arc(cx, cy, r, Math.PI * 0.83, Math.PI * 0.17, false);
-    ctx.quadraticCurveTo(cx + r * 0.62, cy + r * 0.86, cx, h - 1.5);
-    ctx.closePath();
 
-    ctx.fillStyle = def.color;
+    // Grounding shadow where the tip meets the map — this is what makes the
+    // pin sit ON the map instead of floating over it, especially in 3D.
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(cx, h - 1.6, 5.5, 1.7, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(10, 18, 26, 0.30)';
+    ctx.filter = 'blur(1px)';
+    ctx.fill();
+    ctx.restore();
+
+    const pin = new Path2D();
+    pin.moveTo(cx, h - 1.5);
+    pin.quadraticCurveTo(cx - r * 0.62, cy + r * 0.86, cx - r * 0.86, cy + r * 0.5);
+    pin.arc(cx, cy, r, Math.PI * 0.83, Math.PI * 0.17, false);
+    pin.quadraticCurveTo(cx + r * 0.62, cy + r * 0.86, cx, h - 1.5);
+    pin.closePath();
+
+    // Lit from above: the head's top edge is brighter than its base, which
+    // reads as depth at 30px where a flat fill reads as a sticker.
+    const grad = ctx.createLinearGradient(0, cy - r, 0, h - 2);
+    grad.addColorStop(0, lightenHex(def.color, 0.28));
+    grad.addColorStop(0.55, def.color);
+    grad.addColorStop(1, def.color);
+    ctx.fillStyle = grad;
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 2;
-    ctx.fill();
-    ctx.stroke();
+    ctx.fill(pin);
+    ctx.stroke(pin);
 
-    // White glyph on the coloured head, scaled from the 24x24 icon grid.
+    // Glyph on the coloured head: a soft dark offset first, then white on top,
+    // so the icon stays crisp against the lighter gradient band.
     const pathD = CATEGORY_ICONS[cat];
     if (pathD) {
       const scale = 14 / 24;
+      const glyph = new Path2D(pathD);
+      ctx.save();
+      ctx.translate(cx - 7, cy - 6.6);
+      ctx.scale(scale, scale);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+      ctx.fill(glyph);
+      ctx.restore();
       ctx.save();
       ctx.translate(cx - 7, cy - 7);
       ctx.scale(scale, scale);
       ctx.fillStyle = '#ffffff';
-      ctx.fill(new Path2D(pathD));
+      ctx.fill(glyph);
       ctx.restore();
     }
 
@@ -879,6 +976,7 @@ function switchBasemap(key, { persist = true } = {}) {
     if (state.selectedId) highlightOnMap(state.selectedId);
     if (state.walk) applyWalkToMap();
   });
+  syncViewButtons();
 }
 
 // ---------------------------------------------------------------------------
