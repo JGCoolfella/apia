@@ -1,7 +1,7 @@
 {
-  "generated": "2026-07-28T22:46:00.168Z",
+  "generated": "2026-08-03T17:13:13.130Z",
   "pipeline_version": 5,
-  "osm_data_timestamp": "2026-07-28T22:44:06Z",
+  "osm_data_timestamp": "2026-08-03T17:11:36Z",
   "endpoint": "https://overpass-api.de/api/interpreter",
   "bbox": {
     "south": -14.1,
@@ -9,14 +9,14 @@
     "north": -13.4,
     "east": -171.35
   },
-  "feature_count": 3482,
-  "raw_element_count": 4894,
+  "feature_count": 3484,
+  "raw_element_count": 4896,
   "duplicates_collapsed": 144,
   "counts": {
     "sights": 136,
     "shops": 414,
     "places": 525,
-    "transport": 548,
+    "transport": 549,
     "emergency": 17,
     "outdoors": 379,
     "stay": 143,
@@ -25,7 +25,7 @@
     "education": 194,
     "money": 59,
     "food": 128,
-    "worship": 547,
+    "worship": 548,
     "services": 237
   },
   "source": "OpenStreetMap contributors",
