@@ -1,7 +1,7 @@
 {
-  "generated": "2026-08-03T17:13:13.130Z",
+  "generated": "2026-08-10T16:04:05.607Z",
   "pipeline_version": 5,
-  "osm_data_timestamp": "2026-08-03T17:11:36Z",
+  "osm_data_timestamp": "2026-08-10T16:02:09Z",
   "endpoint": "https://overpass-api.de/api/interpreter",
   "bbox": {
     "south": -14.1,
@@ -10,7 +10,7 @@
     "east": -171.35
   },
   "feature_count": 3484,
-  "raw_element_count": 4896,
+  "raw_element_count": 4897,
   "duplicates_collapsed": 144,
   "counts": {
     "sights": 136,
