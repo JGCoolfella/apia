@@ -1,7 +1,7 @@
 {
-  "generated": "2026-08-17T15:31:08.444Z",
+  "generated": "2026-08-24T15:45:28.554Z",
   "pipeline_version": 5,
-  "osm_data_timestamp": "2026-08-17T15:29:01Z",
+  "osm_data_timestamp": "2026-08-24T15:44:05Z",
   "endpoint": "https://overpass-api.de/api/interpreter",
   "bbox": {
     "south": -14.1,
@@ -9,12 +9,12 @@
     "north": -13.4,
     "east": -171.35
   },
-  "feature_count": 3484,
-  "raw_element_count": 4897,
+  "feature_count": 3485,
+  "raw_element_count": 4898,
   "duplicates_collapsed": 144,
   "counts": {
     "sights": 136,
-    "shops": 414,
+    "shops": 415,
     "places": 525,
     "transport": 549,
     "emergency": 17,
