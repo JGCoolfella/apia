@@ -1,8 +1,8 @@
 {
-  "generated": "2026-08-31T20:44:46.363Z",
+  "generated": "2026-09-07T19:13:18.081Z",
   "pipeline_version": 5,
-  "osm_data_timestamp": "2026-08-31T20:42:51Z",
-  "endpoint": "https://overpass-api.de/api/interpreter",
+  "osm_data_timestamp": "2026-09-07T19:10:36Z",
+  "endpoint": "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
   "bbox": {
     "south": -14.1,
     "west": -172.85,
