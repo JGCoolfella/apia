@@ -1,22 +1,22 @@
 {
-  "generated": "2026-09-07T19:13:18.081Z",
+  "generated": "2026-09-14T19:47:28.117Z",
   "pipeline_version": 5,
-  "osm_data_timestamp": "2026-09-07T19:10:36Z",
-  "endpoint": "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+  "osm_data_timestamp": "2026-09-14T19:46:06Z",
+  "endpoint": "https://overpass-api.de/api/interpreter",
   "bbox": {
     "south": -14.1,
     "west": -172.85,
     "north": -13.4,
     "east": -171.35
   },
-  "feature_count": 3485,
+  "feature_count": 3487,
   "raw_element_count": 4898,
   "duplicates_collapsed": 144,
   "counts": {
     "sights": 136,
     "shops": 415,
     "places": 525,
-    "transport": 549,
+    "transport": 550,
     "emergency": 17,
     "outdoors": 379,
     "stay": 143,
@@ -26,7 +26,7 @@
     "money": 59,
     "food": 128,
     "worship": 548,
-    "services": 237
+    "services": 238
   },
   "source": "OpenStreetMap contributors",
   "license": "Open Database License (ODbL) 1.0",
